@@ -1,7 +1,9 @@
 all: ppx sample
 
 sample: ppx_toMeta.native foo.ml
-	ocamlfind ppx_tools/rewriter ./ppx_getenv.native foo.ml
+	ocamlc -dsource -ppx ./ppx_toMeta.native foo.ml
+	rm *.cmi *.cmo	
+	#ocamlfind ppx_tools/rewriter ./ppx_getenv.native foo.ml
 
 ppx: ppx_toMeta.ml
 	ocamlbuild -package compiler-libs.common ppx_toMeta.native
