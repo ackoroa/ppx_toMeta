@@ -45,7 +45,45 @@ let getStatVars = fun funDef ->
   let atrList = getAtrList funDef in
   extractStatVars atrList
 
-let buildMeta = fun funRec funDef statVars dynVars mapper -> 
+let getStagedName = fun origName vbLoc ->
+  match origName.ppat_desc with 
+    Ppat_var {loc = nameStrLoc; txt = origNameStr} ->
+        let nameStr = origNameStr^"S" in
+        Pat.var ~loc:vbLoc ~attrs:[] {loc=nameStrLoc;txt=nameStr}
+    | _ -> failwith "not a valid function name pattern"
+
+let buildArgList args body loc =
+  let rec aux args =
+    match args with
+      [] -> body
+      | arg::args -> 
+            Exp.fun_ ~loc ~attrs:[] "" None 
+              (Pat.var ~loc ~attrs:[] {loc=loc;txt=arg}) 
+              (aux args)
+  in aux args
+
+let buildStagedBody = fun statVars dynVars actualBody loc ->
+  let letBody = 
+    Exp.let_ ~loc ~attrs:[] Nonrecursive 
+      [Vb.mk ~loc ~attrs:[]
+         (Pat.var ~loc ~attrs:[] {loc=loc;txt="f"})
+         (buildArgList dynVars actualBody loc)]
+      (Exp.ident ~loc ~attrs:[] {loc=loc;txt=Lident "f"})
+  in buildArgList statVars letBody loc
+
+let getStagedBody = fun origBody vbLoc vars statVars dynVars ->
+  let nVars = List.length vars in
+  let rec aux funBody n =
+    if n=0 
+      then funBody 
+      else 
+        match funBody with
+          {pexp_desc = Pexp_fun (_, _, _, funBody)} -> aux funBody (n-1)
+          | _ -> failwith "arguments missing?"
+  in let actualBody = aux origBody nVars in
+  buildStagedBody statVars dynVars actualBody vbLoc
+
+let buildMeta = fun funRec funDef vars statVars dynVars -> 
   if funRec
     then
       failwith "not implemented"
@@ -56,8 +94,10 @@ let buildMeta = fun funRec funDef statVars dynVars mapper ->
                 | _ -> failwith "not a function definition"
       in let vbLoc = (List.hd f).pvb_loc in
       let funName = (List.hd f).pvb_pat in
+      let stagedName = getStagedName funName vbLoc in
       let funBody = (List.hd f).pvb_expr in
-      Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] funName funBody]
+      let stagedBody = getStagedBody funBody vbLoc vars statVars dynVars in
+      Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName stagedBody]
 
 let toMeta_mapper argv =
   { default_mapper with
@@ -68,7 +108,7 @@ let toMeta_mapper argv =
           let vars = getVars structure_item in
           let statVars = getStatVars structure_item in
           let dynVars = List.filter (fun v -> not (List.exists (fun sv -> v=sv) statVars)) vars in
-          buildMeta r structure_item statVars dynVars mapper
+          buildMeta r structure_item vars statVars dynVars
         else
           default_mapper.structure_item mapper structure_item
   }
