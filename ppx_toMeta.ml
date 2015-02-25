@@ -69,7 +69,11 @@ let buildStagedBody = fun statVars dynVars actualBody loc ->
          (Pat.var ~loc ~attrs:[] {loc=loc;txt="f"})
          (buildArgList dynVars actualBody loc)]
       (Exp.ident ~loc ~attrs:[] {loc=loc;txt=Lident "f"})
-  in buildArgList statVars letBody loc
+  in let liftedLetBody =
+    Exp.apply ~loc ~attrs:[] 
+      (Exp.ident ~loc ~attrs:[] {loc=loc;txt=Lident "lift"})
+      [("", letBody)]
+  in buildArgList statVars liftedLetBody loc
 
 let getStagedBody = fun origBody vbLoc vars statVars dynVars ->
   let nVars = List.length vars in
