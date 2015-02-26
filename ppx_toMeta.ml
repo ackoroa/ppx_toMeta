@@ -75,31 +75,47 @@ let buildStagedBody = fun statVars dynVars actualBody loc ->
       [("", letBody)]
   in buildArgList statVars liftedLetBody loc
 
+let rec removeArguments funBody n =
+  if n=0 
+    then funBody 
+    else 
+      match funBody with
+        {pexp_desc = Pexp_fun (_, _, _, funBody)} -> removeArguments funBody (n-1)
+        | _ -> failwith "arguments missing?"
+
+let subRecCall = fun funBody funName statVars ->
+  (*let rec aux funBody =
+    match funBody with
+      {pexp_desc = Pexp_fun (lbl, opt, pat, funBody)} -> 
+          {pexp_desc = Pexp_fun (lbl, opt, pat, aux funBody)}
+      | _ -> failwith "not implemented"
+  in *)failwith "not implemented"
+
+let getStagedRecBody = fun origBody vbLoc vars statVars dynVars funName ->
+  let nVars = List.length vars in
+  let actualBody = removeArguments origBody nVars in
+  let actualBody' = subRecCall actualBody funName statVars in
+  buildStagedBody statVars dynVars actualBody' vbLoc
+
 let getStagedBody = fun origBody vbLoc vars statVars dynVars ->
   let nVars = List.length vars in
-  let rec aux funBody n =
-    if n=0 
-      then funBody 
-      else 
-        match funBody with
-          {pexp_desc = Pexp_fun (_, _, _, funBody)} -> aux funBody (n-1)
-          | _ -> failwith "arguments missing?"
-  in let actualBody = aux origBody nVars in
+  let actualBody = removeArguments origBody nVars in
   buildStagedBody statVars dynVars actualBody vbLoc
 
 let buildMeta = fun funRec funDef vars statVars dynVars -> 
+  let strLoc = funDef.pstr_loc in
+  let f = match funDef.pstr_desc with
+            Pstr_value (_,f) -> f
+            | _ -> failwith "not a function definition"
+  in let vbLoc = (List.hd f).pvb_loc in
+  let funName = (List.hd f).pvb_pat in
+  let stagedName = getStagedName funName vbLoc in
+  let funBody = (List.hd f).pvb_expr in
   if funRec
     then
-      failwith "not implemented"
+      let stagedBody = getStagedRecBody funBody vbLoc vars statVars dynVars funName in
+      Str.value ~loc:strLoc Recursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName stagedBody]
     else
-      let strLoc = funDef.pstr_loc in
-      let f = match funDef.pstr_desc with
-                Pstr_value (_,f) -> f
-                | _ -> failwith "not a function definition"
-      in let vbLoc = (List.hd f).pvb_loc in
-      let funName = (List.hd f).pvb_pat in
-      let stagedName = getStagedName funName vbLoc in
-      let funBody = (List.hd f).pvb_expr in
       let stagedBody = getStagedBody funBody vbLoc vars statVars dynVars in
       Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName stagedBody]
 

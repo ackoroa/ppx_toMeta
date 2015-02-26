@@ -6,6 +6,9 @@ sample: ppx foo.ml
 ppx: ppx_toMeta.ml
 	ocamlbuild -package compiler-libs.common ppx_toMeta.native
 
+test: ppx test_toMeta.ml
+	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native test_toMeta.ml
+
 ast: foo.ml
 	ocamlfind ppx_tools/dumpast foo.ml
 
