@@ -47,6 +47,25 @@ let rec removeArguments funBody n =
         {pexp_desc = Pexp_fun (_, _, _, funBody)} -> removeArguments funBody (n-1)
         | _ -> failwith "arguments missing?"
 
+let buildAuxCall = fun statVars dynVars loc ->
+  let newBodyArgs = 
+    List.append 
+      (List.map 
+         (fun v -> ("", Exp.apply ~loc ~attrs:[] 
+                          (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "lift"}) 
+                          [("", Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident v})])) 
+         dynVars)
+      (List.map 
+         (fun v -> ("", Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident v})) 
+         statVars) 
+  in let newBody =
+    Exp.apply ~loc ~attrs:[] 
+      (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "aux"})
+      newBodyArgs  
+  in Exp.apply ~loc ~attrs:[] 
+    (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "esc"})
+    [("", newBody)]
+
 let subRecCall = fun funBody funName statVars ->
   let rec sub funBody =
     match funBody with
@@ -92,6 +111,7 @@ let buildArgList args body loc =
   in aux args
 
 let buildStagedBody = fun funRec statVars dynVars actualBody loc ->
+  
   let recFlag = if funRec then Recursive else Nonrecursive in
   let letBody = 
     Exp.let_ ~loc ~attrs:[] recFlag
@@ -105,14 +125,37 @@ let buildStagedBody = fun funRec statVars dynVars actualBody loc ->
       [("", letBody)]
   in buildArgList statVars liftedLetBody loc
 
-let getStagedBody = fun origBody vbLoc vars statVars dynVars funRec funName ->
+let rec expContainsVar = fun exp var ->
+  match exp with
+    {pexp_desc = Pexp_apply (op, es)} ->
+        List.exists (fun (_, e) -> expContainsVar e var) es
+    | {pexp_desc = Pexp_ident {txt = Lident v}} ->
+        v = var
+    | _ -> false
+
+let controlVarStatic = fun statVars actualBody ->
+  let rec aux body =
+    match body with
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt)} ->
+          (List.exists (fun v -> expContainsVar condExp v) statVars) 
+            || aux thenExp 
+            || begin match elseExpOpt with Some e -> aux e | None -> false end
+      | {pexp_desc = Pexp_apply (op, es)} ->
+          List.exists (fun (_, e) -> aux e) es
+      | _ -> false
+  in aux actualBody
+
+let getStagedBody = fun origBody loc vars statVars dynVars funRec funName ->
   let nVars = List.length vars in
   let actualBody = removeArguments origBody nVars in
   let actualBody' = 
     if funRec
-      then subRecCall actualBody funName statVars
+      then 
+        if controlVarStatic statVars actualBody
+          then buildAuxCall statVars dynVars loc
+          else subRecCall actualBody funName statVars
       else actualBody
-  in buildStagedBody funRec statVars dynVars actualBody' vbLoc
+  in buildStagedBody funRec statVars dynVars actualBody' loc
 
 let buildMeta = fun funRec funDef vars statVars dynVars -> 
   let strLoc = funDef.pstr_loc in
