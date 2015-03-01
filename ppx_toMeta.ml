@@ -91,9 +91,10 @@ let buildArgList args body loc =
             (aux args)
   in aux args
 
-let buildStagedBody = fun statVars dynVars actualBody loc ->
+let buildStagedBody = fun funRec statVars dynVars actualBody loc ->
+  let recFlag = if funRec then Recursive else Nonrecursive in
   let letBody = 
-    Exp.let_ ~loc ~attrs:[] Nonrecursive 
+    Exp.let_ ~loc ~attrs:[] recFlag
       [Vb.mk ~loc ~attrs:[]
          (Pat.var ~loc ~attrs:[] {loc=loc;txt="f"})
          (buildArgList dynVars actualBody loc)]
@@ -111,7 +112,7 @@ let getStagedBody = fun origBody vbLoc vars statVars dynVars funRec funName ->
     if funRec
       then subRecCall actualBody funName statVars
       else actualBody
-  in buildStagedBody statVars dynVars actualBody' vbLoc
+  in buildStagedBody funRec statVars dynVars actualBody' vbLoc
 
 let buildMeta = fun funRec funDef vars statVars dynVars -> 
   let strLoc = funDef.pstr_loc in
