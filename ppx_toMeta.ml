@@ -61,23 +61,23 @@ let subRecCall = fun funBody funName statVars ->
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
               | _ -> failwith "not a valid function identifier"
             end in
-          if fname = funName
-            then 
-              let fn' = Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "f"} in
-              let argList' = 
-                let rec aux args =
-                  match args with
-                    [] -> []
-                    | (lbl, exp)::args -> 
-                        match exp with
-                          {pexp_desc = Pexp_ident {txt = Lident v}} ->
-                              if List.exists (fun sv -> sv=v) statVars
-                                then aux args
-                                else (lbl, exp)::(aux args)
-                          | exp -> (lbl, sub exp)::(aux args)
-                in aux argList
-              in Exp.apply ~loc ~attrs:[] fn' argList'
-            else Exp.apply ~loc ~attrs:[] fn argList
+          let fn' = 
+            if fname = funName
+              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "f"}
+              else fn
+          in let argList' = 
+            let rec aux args =
+              match args with
+                [] -> []
+                | (lbl, exp)::args ->
+                    match exp with
+                      {pexp_desc = Pexp_ident {txt = Lident v}} ->
+                          if fname = funName && List.exists (fun sv -> sv=v) statVars
+                            then aux args
+                            else (lbl, exp)::(aux args)
+                      | exp -> (lbl, sub exp)::(aux args)
+            in aux argList
+         in Exp.apply ~loc ~attrs:[] fn' argList'
       | exp -> exp
   in sub funBody
 
