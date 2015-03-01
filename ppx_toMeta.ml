@@ -104,16 +104,14 @@ let buildStagedBody = fun statVars dynVars actualBody loc ->
       [("", letBody)]
   in buildArgList statVars liftedLetBody loc
 
-let getStagedRecBody = fun origBody vbLoc vars statVars dynVars funName ->
+let getStagedBody = fun origBody vbLoc vars statVars dynVars funRec funName ->
   let nVars = List.length vars in
   let actualBody = removeArguments origBody nVars in
-  let actualBody' = subRecCall actualBody funName statVars in
-  buildStagedBody statVars dynVars actualBody' vbLoc
-
-let getStagedBody = fun origBody vbLoc vars statVars dynVars ->
-  let nVars = List.length vars in
-  let actualBody = removeArguments origBody nVars in
-  buildStagedBody statVars dynVars actualBody vbLoc
+  let actualBody' = 
+    if funRec
+      then subRecCall actualBody funName statVars
+      else actualBody
+  in buildStagedBody statVars dynVars actualBody' vbLoc
 
 let buildMeta = fun funRec funDef vars statVars dynVars -> 
   let strLoc = funDef.pstr_loc in
@@ -128,13 +126,8 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
       | _ -> failwith "not a valid fun name pattern"
   in let stagedName = Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = (funName^"S")} in
   let funBody = (List.hd f).pvb_expr in
-  if funRec
-    then
-      let stagedBody = getStagedRecBody funBody vbLoc vars statVars dynVars funName in
-      Str.value ~loc:strLoc Recursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName stagedBody]
-    else
-      let stagedBody = getStagedBody funBody vbLoc vars statVars dynVars in
-      Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName stagedBody]
+  let stagedBody = getStagedBody funBody vbLoc vars statVars dynVars funRec funName in
+  Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName stagedBody]
 
 let toMeta_mapper argv =
   { default_mapper with
