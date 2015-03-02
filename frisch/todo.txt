@@ -52,6 +52,12 @@ make: *** [nomli] Error 10
 ====================================================================
 # copy_typedef.ml
 
+File "copy_typedef.ml", line 171, characters 4-82:
+Error: The method `implementation' has no previous definition
+Command exited with code 2.
+Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
+make: *** [copy_td] Error 10
+
 File "copy_typedef.ml", line 35, characters 12-29:
 Error: Unbound class Ast_mapper.mapper
 Command exited with code 2.

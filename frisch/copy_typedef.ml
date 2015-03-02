@@ -32,7 +32,7 @@ module Main : sig end = struct
     exit 2
 
   class maintain_path = object(this)
-    inherit Ast_mapper.mapper as super
+    inherit Ast_mapper_class.mapper as super
 
     val path = []
 
@@ -177,5 +177,5 @@ module Main : sig end = struct
       super # interface f x
   end
 
-  let () = Ast_mapper.main copy
+  let () = Ast_mapper_class.main copy
 end
