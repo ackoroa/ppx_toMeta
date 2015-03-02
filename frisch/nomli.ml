@@ -9,7 +9,7 @@ open Types
 open! Typedtree
 open Ast_helper
 
-let mli_attr l = Convenience.find_attr "mli" l
+let mli_attr l = Ast_convenience.find_attr "mli" l
 
 let map_flatten f l =
   List.flatten (List.map f l)

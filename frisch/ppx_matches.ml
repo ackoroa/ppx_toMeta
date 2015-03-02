@@ -19,8 +19,8 @@ let mapper _args =
             let guard = Ast_mapper.map_opt (this.expr this) guard in
             Exp.function_ ~loc:e.pexp_loc
               [
-            Exp.case p ?guard (Convenience.constr "true" []);
-            Exp.case (Pat.any ()) (Convenience.constr "false" []);
+            Exp.case p ?guard (Ast_convenience.constr "true" []);
+            Exp.case (Pat.any ()) (Ast_convenience.constr "false" []);
               ]
         | _ -> super.expr this e
      )

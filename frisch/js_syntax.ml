@@ -15,7 +15,8 @@ open! Location
 open Parsetree
 open Longident
 open Ast_helper
-open Ast_helper.Convenience
+(* open Ast_helper.Convenience *)
+open Ast_convenience
 
 (* A few local helper functions to simplify the creation of AST nodes. *)
 let apply_ f l = app (evar f) l

@@ -27,7 +27,8 @@ module Main : sig end = struct
   open Parsetree
   open Ast_helper
   open Outcometree
-  open Ast_helper.Convenience
+  (* open Ast_helper.Convenience *)
+  open Ast_convenience
 
   let rec lid_of_out_ident = function
     | Oide_apply _ -> assert false
@@ -38,7 +39,7 @@ module Main : sig end = struct
     | Oval_string x -> str x
     | Oval_int x -> int x
     | Oval_char x -> char x
-    | Oval_float x -> Ast_helper.Convenience.float x
+    | Oval_float x -> Ast_convenience.float x
     | Oval_list l -> list (List.map exp_of_out_value l)
     | Oval_array l -> Exp.array (List.map exp_of_out_value l)
     | Oval_constr (c, args) -> constr (lid_of_out_ident c) (List.map exp_of_out_value args)

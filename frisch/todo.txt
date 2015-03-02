@@ -13,10 +13,59 @@ Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
 make: *** [ifdef] Error 10
 
 ====================================================================
+# eval.ml
+
+pls2nus@loris-laptop:~/hg/ppx_ak/frisch$ make eval
+ocamlbuild -r -package compiler-libs.common -package ppx_tools eval.native
++ /usr/.opam/4.02.1/bin/ocamlc.opt -c -I /usr/.opam/4.02.1/lib/ocaml/compiler-libs -I /usr/.opam/4.02.1/lib/ppx_tools -o eval.cmo eval.ml
+File "eval.ml", line 56, characters 36-54:
+Error: This expression has type Parsetree.module_expr
+       but an expression was expected of type
+         Parsetree.include_declaration =
+           Parsetree.module_expr Parsetree.include_infos
+Command exited with code 2.
+Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
+make: *** [eval] Error 10
 ====================================================================
+# js_syntax
+
+ocamlbuild -r -package compiler-libs.common -package ppx_tools js_syntax.native
++ /usr/.opam/4.02.1/bin/ocamlc.opt -c -I /usr/.opam/4.02.1/lib/ocaml/compiler-libs -I /usr/.opam/4.02.1/lib/ppx_tools -o js_syntax.cmo js_syntax.ml
+File "js_syntax.ml", line 89, characters 58-74:
+Error: This expression has type 'a * 'b
+       but an expression was expected of type
+         string * Parsetree.attributes * Parsetree.core_type
+Command exited with code 2.
+Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
+make: *** [js] Error 10
 ====================================================================
+# nomli.ml
+
+pls2nus@loris-laptop:~/hg/ppx_ak/frisch$ make nomli
+ocamlbuild -r -package compiler-libs.common -package ppx_tools nomli.native
++ /usr/.opam/4.02.1/bin/ocamlc.opt -c -I /usr/.opam/4.02.1/lib/ocaml/compiler-libs -I /usr/.opam/4.02.1/lib/ppx_tools -o nomli.cmo nomli.ml
+File "nomli.ml", line 60, characters 16-44:
+Error: Unbound module Untypeast
+Command exited with code 2.
+Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
+make: *** [nomli] Error 10
 ====================================================================
+# copy_typedef.ml
+
+File "copy_typedef.ml", line 35, characters 12-29:
+Error: Unbound class Ast_mapper.mapper
+Command exited with code 2.
+Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
+make: *** [copy_td] Error 10
 ====================================================================
+pls2nus@loris-laptop:~/hg/ppx_ak/frisch$ make unused
+ocamlbuild -r -package compiler-libs.common -package ppx_tools unused_exported_values.native
++ /usr/.opam/4.02.1/bin/ocamlc.opt -c -I /usr/.opam/4.02.1/lib/ocaml/compiler-libs -I /usr/.opam/4.02.1/lib/ppx_tools -o unused_exported_values.cmo unused_exported_values.ml
+File "unused_exported_values.ml", line 31, characters 10-24:
+Error: Unbound module Tast_iter
+Command exited with code 2.
+Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
+make: *** [unused] Error 10
 ====================================================================
 ====================================================================
 ====================================================================
