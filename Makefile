@@ -9,10 +9,10 @@ ppx: ppx_toMeta.ml
 test: ppx test_toMeta.ml
 	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native test_toMeta.ml
 
-ast: foo.ml
+ast:
 	ocamlfind ppx_tools/dumpast foo.ml
 
-tAst: bar.ml
+tAst:
 	ocamlfind ppx_tools/dumpast bar.ml
 
 cAst: ppx
