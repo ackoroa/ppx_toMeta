@@ -43,7 +43,15 @@ let getenv loc arg =
         Location.print_error loc;
       exit 2
 
-let empty_str_item = Str.include_ (Mod.structure [])
+(* type: ?loc:Ast_helper.loc -> *)
+(*   Parsetree.include_declaration -> Parsetree.structure_item *)
+
+(* type: ?loc:Ast_helper.loc -> *)
+(*   ?attrs:Ast_helper.attrs -> Parsetree.structure -> Parsetree.module_expr *)
+
+let kk = Incl.mk (Mod.structure [])
+
+let empty_str_item = Str.include_ kk
 
 let ifdef _args =
   let stack = ref [] in

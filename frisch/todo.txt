@@ -1,4 +1,4 @@
-# ifdef
+# ifdef (FIXED)
 
 pls2nus@loris-laptop:~/hg/ppx_ak/frisch$ make ifdef
 ocamlbuild -r -package compiler-libs.common -package ppx_tools ifdef.native
@@ -13,19 +13,17 @@ Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
 make: *** [ifdef] Error 10
 
 ====================================================================
-# eval.ml
+# eval.ml (make eval2)
 
-pls2nus@loris-laptop:~/hg/ppx_ak/frisch$ make eval
-ocamlbuild -r -package compiler-libs.common -package ppx_tools eval.native
-+ /usr/.opam/4.02.1/bin/ocamlc.opt -c -I /usr/.opam/4.02.1/lib/ocaml/compiler-libs -I /usr/.opam/4.02.1/lib/ppx_tools -o eval.cmo eval.ml
-File "eval.ml", line 56, characters 36-54:
-Error: This expression has type Parsetree.module_expr
-       but an expression was expected of type
-         Parsetree.include_declaration =
-           Parsetree.module_expr Parsetree.include_infos
+File "_none_", line 1:
+Error: No implementations provided for the following modules:
+         Errors referenced from eval.cmx
+         Toploop referenced from eval.cmx
+         Topdirs referenced from eval.cmx
 Command exited with code 2.
-Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
-make: *** [eval] Error 10
+Compilation unsuccessful after building 4 targets (3 cached) in 00:00:00.
+make: *** [eval2] Error 10
+
 ====================================================================
 # js_syntax
 
@@ -39,39 +37,36 @@ Command exited with code 2.
 Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
 make: *** [js] Error 10
 ====================================================================
-# nomli.ml
+# nomli.ml (make nomli2)
 
-pls2nus@loris-laptop:~/hg/ppx_ak/frisch$ make nomli
-ocamlbuild -r -package compiler-libs.common -package ppx_tools nomli.native
-+ /usr/.opam/4.02.1/bin/ocamlc.opt -c -I /usr/.opam/4.02.1/lib/ocaml/compiler-libs -I /usr/.opam/4.02.1/lib/ppx_tools -o nomli.cmo nomli.ml
+ocamlbuild -r -package compiler-libs.common -package ppx_tools -cflags -I,/home/pls2nus/hg/src/ocaml-4.02.1/tools nomli.native
++ /usr/.opam/4.02.1/bin/ocamlc.opt -c -I /home/pls2nus/hg/src/ocaml-4.02.1/tools -I /usr/.opam/4.02.1/lib/ocaml/compiler-libs -I /usr/.opam/4.02.1/lib/ppx_tools -o nomli.cmo nomli.ml
 File "nomli.ml", line 60, characters 16-44:
 Error: Unbound module Untypeast
 Command exited with code 2.
-Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
-make: *** [nomli] Error 10
+Compilation unsuccessful after building 2 targets (1 cached) in 00:00:00.
+make: *** [nomli2] Error 10
+
+File "nomli.ml", line 108, characters 81-84:
+Error: This expression has type tool_name:string -> Parsetree.structure
+       but an expression was expected of type
+         Parsetree.structure = Parsetree.structure_item list
+Command exited with code 2.
+Compilation unsuccessful after building 2 targets (1 cached) in 00:00:00.
+make: *** [nomli2] Error 10
 ====================================================================
 # copy_typedef.ml
 
-File "copy_typedef.ml", line 171, characters 4-82:
-Error: The method `implementation' has no previous definition
-Command exited with code 2.
-Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
-make: *** [copy_td] Error 10
+removed main + super interface/implementation
+====================================================================
+# unused
 
-File "copy_typedef.ml", line 35, characters 12-29:
-Error: Unbound class Ast_mapper.mapper
+File "_none_", line 1:
+Error: No implementations provided for the following modules:
+         Tast_iter referenced from unused_exported_values.cmx
 Command exited with code 2.
-Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
-make: *** [copy_td] Error 10
-====================================================================
-pls2nus@loris-laptop:~/hg/ppx_ak/frisch$ make unused
-ocamlbuild -r -package compiler-libs.common -package ppx_tools unused_exported_values.native
-+ /usr/.opam/4.02.1/bin/ocamlc.opt -c -I /usr/.opam/4.02.1/lib/ocaml/compiler-libs -I /usr/.opam/4.02.1/lib/ppx_tools -o unused_exported_values.cmo unused_exported_values.ml
-File "unused_exported_values.ml", line 31, characters 10-24:
-Error: Unbound module Tast_iter
-Command exited with code 2.
-Compilation unsuccessful after building 2 targets (0 cached) in 00:00:00.
-make: *** [unused] Error 10
+Compilation unsuccessful after building 4 targets (3 cached) in 00:00:00.
+make: *** [unused2] Error 10
 ====================================================================
 ====================================================================
 ====================================================================
@@ -83,6 +78,4 @@ make: *** [unused] Error 10
 ====================================================================
 ====================================================================
 ====================================================================
-
-
 

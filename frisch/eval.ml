@@ -53,7 +53,7 @@ module Main : sig end = struct
           v;
         exit 2
 
-  let empty_str_item = Str.include_ (Mod.structure [])
+  let empty_str_item = Str.include_ (Incl.mk (Mod.structure []))
 
   let run phr =
     try Toploop.execute_phrase true Format.err_formatter phr
