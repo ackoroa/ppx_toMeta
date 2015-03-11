@@ -11,7 +11,7 @@ pp: ToMetaPostProc.java
 
 test: ppx pp test_toMeta.ml
 	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native test_toMeta.ml > testRes.out
-	java ToMetaPostProc testRes.out
+	java ToMetaPostProc testRes.out > testMeta.ml
 
 ast:
 	ocamlfind ppx_tools/dumpast foo.ml

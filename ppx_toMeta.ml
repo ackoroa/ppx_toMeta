@@ -10,10 +10,10 @@ let applyFun = fun funTarget funName loc ->
     [("", funTarget)]
 
 let applyLift = fun funTarget loc ->
-  applyFun funTarget "lift" loc
+  applyFun funTarget "_l" loc
 
 let applyEsc = fun funTarget loc ->
-  applyFun funTarget "esc" loc
+  applyFun funTarget "_e" loc
 
 let isRecursive = fun funDef ->
   match funDef with
@@ -79,7 +79,7 @@ let isControlVarStatic = fun statVars actualBody ->
   in aux actualBody
 
 let subAuxBody = fun funBody funName statVars dynVars loc ->
-  let rec sub funBody liftFlag =
+  let rec sub funBody inEsc =
     match funBody with
       {pexp_desc = Pexp_ifthenelse (cond, thenExp, elseExpOpt); pexp_loc = loc} ->
           begin match elseExpOpt with
@@ -101,35 +101,36 @@ let subAuxBody = fun funBody funName statVars dynVars loc ->
               then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "aux"}
               else fn
           in let argList' = 
-            if fname = funName
-              then let rec aux args =
-                     match args with
-                       [] -> []
-                       | (lbl, exp)::args -> (lbl, sub exp true)::(aux args)
-                   in aux argList
-              else let rec aux args =
-                     match args with
-                       [] -> []
-                       | (lbl, exp)::args -> (lbl, sub exp false)::(aux args)
-                   in aux argList
+            let rec aux args =
+              match args with
+                [] -> []
+                | (lbl, exp)::args -> (lbl, sub exp (fname = funName))::(aux args)
+            in aux argList
           in let e = Exp.apply ~loc ~attrs:[] fn' argList' in
           if fname = funName then applyEsc e loc else e
       | {pexp_desc = Pexp_ident {txt = Lident v; loc = loc}} ->
-          if List.exists (fun dv -> v=dv) dynVars
-            then if liftFlag then applyLift funBody loc else applyEsc funBody loc
+          if not inEsc && (List.exists (fun dv -> v=dv) dynVars)
+            then applyEsc funBody loc
             else funBody
       | exp -> exp
   in sub funBody false
 
-let buildAuxCall = fun statVars dynVars loc ->
+let buildAuxCall = fun vars statVars dynVars loc ->
   let newBodyArgs = 
-    List.append 
+    (*List.append 
       (List.map 
          (fun v -> ("", applyLift (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident v}) loc)) 
          dynVars)
       (List.map 
          (fun v -> ("", Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident v})) 
-         statVars) 
+         statVars) *)
+    List.map
+      (fun v ->
+           let identExp = Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident v} in
+           if List.exists (fun dv -> v=dv) dynVars 
+             then ("", applyLift identExp loc)
+             else ("", identExp))
+      vars
   in let newBody =
     Exp.apply ~loc ~attrs:[] 
       (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "aux"})
@@ -197,7 +198,7 @@ let getStagedBody = fun origBody loc vars statVars dynVars funRec funName ->
   let toStageBody =
     if funRec
       then if useAux
-             then buildAuxCall statVars dynVars loc
+             then buildAuxCall vars statVars dynVars loc
              else subRecCall actualBody funName statVars
       else actualBody
   in let stagedBody = buildStagedBody (funRec && (not useAux)) statVars dynVars toStageBody loc in
@@ -207,7 +208,7 @@ let getStagedBody = fun origBody loc vars statVars dynVars funRec funName ->
            Exp.let_ ~loc ~attrs:[] Recursive
              [Vb.mk ~loc ~attrs:[]
                 (Pat.var ~loc ~attrs:[] {loc = loc; txt = "aux"})
-                (buildArgList (dynVars@statVars) auxBody loc)]
+                (buildArgList vars auxBody loc)]
            stagedBody
       else stagedBody
   in buildArgList statVars fullBody loc
