@@ -5,17 +5,23 @@ open Parsetree
 open Longident
 
 let applyFun = fun funTarget funName loc ->
-  Exp.apply ~loc ~attrs:[] 
+  Exp.apply ~loc ~attrs:[]
     (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident funName})
     [("", funTarget)]
 
-let applyLift = fun funTarget loc ->
-  (*applyFun funTarget "_l" loc*)
-  Exp.mk ~loc ~attrs:[({txt = "metaocaml.bracket"; loc = loc}, PStr [])] funTarget.pexp_desc
+let applyMetaOCamlConstr = fun constrTarget constrName loc ->
+  Exp.mk ~loc 
+    ~attrs:[({txt = constrName; loc = loc}, PStr [])] 
+    constrTarget.pexp_desc
 
-let applyEsc = fun funTarget loc ->
-  (* applyFun funTarget "_e" loc *)
-  Exp.mk ~loc ~attrs:[({txt = "metaocaml.escape"; loc = loc}, PStr [])] funTarget.pexp_desc
+let applyLift = fun liftTarget loc ->
+  applyMetaOCamlConstr liftTarget "metaocaml.bracket" loc
+
+let applyEsc = fun escTarget loc ->
+  applyMetaOCamlConstr escTarget "metaocaml.escape" loc
+
+let applyRun = fun tunTarget loc ->
+  applyFun runTarget "Runcode.run" loc
 
 let isRecursive = fun funDef ->
   match funDef with
@@ -118,14 +124,7 @@ let subAuxBody = fun funBody funName statVars dynVars loc ->
   in sub funBody false
 
 let buildAuxCall = fun vars statVars dynVars loc ->
-  let newBodyArgs = 
-    (*List.append 
-      (List.map 
-         (fun v -> ("", applyLift (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident v}) loc)) 
-         dynVars)
-      (List.map 
-         (fun v -> ("", Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident v})) 
-         statVars) *)
+  let newBodyArgs =
     List.map
       (fun v ->
            let identExp = Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident v} in

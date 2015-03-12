@@ -21,5 +21,5 @@ cAst: ppx
 	ocamlfind ppx_tools/dumpast -ppx ./ppx_toMeta.native foo.ml
 
 clean:
-	rm *.cmi *.cmo *~ *.out
+	rm *.cmi *.cmo *~ *.out *.orig
 
