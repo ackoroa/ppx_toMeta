@@ -20,7 +20,7 @@ let applyLift = fun liftTarget loc ->
 let applyEsc = fun escTarget loc ->
   applyMetaOCamlConstr escTarget "metaocaml.escape" loc
 
-let applyRun = fun tunTarget loc ->
+let applyRun = fun runTarget loc ->
   applyFun runTarget "Runcode.run" loc
 
 let isRecursive = fun funDef ->
@@ -81,6 +81,9 @@ let isControlVarStatic = fun statVars actualBody ->
           (List.exists (fun v -> expContainsVar condExp v) statVars) 
             || aux thenExp 
             || begin match elseExpOpt with Some e -> aux e | None -> false end
+      | {pexp_desc = Pexp_match (condExp, pattExpList)} ->
+          (List.exists (fun v -> expContainsVar condExp v) statVars)
+            || List.fold_left (||) false (List.map (fun pattExp -> aux pattExp.pc_rhs) pattExpList)
       | {pexp_desc = Pexp_apply (op, es)} ->
           List.exists (fun (_, e) -> aux e) es
       | _ -> false
@@ -89,15 +92,31 @@ let isControlVarStatic = fun statVars actualBody ->
 let subAuxBody = fun funBody funName statVars dynVars loc ->
   let rec sub funBody inEsc =
     match funBody with
-      {pexp_desc = Pexp_ifthenelse (cond, thenExp, elseExpOpt); pexp_loc = loc} ->
-          begin match elseExpOpt with
-            None -> Exp.ifthenelse ~loc ~attrs:[] cond 
-                      (applyLift (sub thenExp false) loc)
-                      None
-            | Some elseExp -> Exp.ifthenelse ~loc ~attrs:[] cond 
-                                (applyLift (sub thenExp false) loc) 
-                                (Some (applyLift (sub elseExp false) loc))
-          end
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_loc = loc} ->
+          let condExp' = sub condExp inEsc in
+          let liftBranch = (List.exists (fun v -> expContainsVar condExp v) statVars) in
+          let thenExp' = if liftBranch 
+                           then (applyLift (sub thenExp inEsc) loc) 
+                           else sub thenExp inEsc
+          in let elseExpOpt' = 
+            begin match elseExpOpt with
+              None -> None
+              | Some elseExp -> 
+                  if liftBranch 
+                    then Some (applyLift (sub elseExp inEsc) loc)
+                    else Some (sub elseExp inEsc)
+            end in
+          Exp.ifthenelse ~loc ~attrs:[] condExp' thenExp' elseExpOpt'
+      | {pexp_desc = Pexp_match (condExp, pattExpList); pexp_loc = loc} ->
+          let condExp' = sub condExp inEsc in
+          let liftBranch = (List.exists (fun v -> expContainsVar condExp v) statVars) in
+          Exp.match_ ~loc ~attrs:[] condExp' 
+            (List.map 
+               (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} -> 
+                  {pc_lhs = lhs; pc_guard = guard; pc_rhs = (if liftBranch 
+                                                               then applyLift (sub rhs inEsc) loc
+                                                               else sub rhs inEsc)}) 
+               pattExpList)
       | {pexp_desc = Pexp_apply (fn, argList); pexp_loc = loc} ->
           let fname = 
             begin match fn with 
@@ -116,6 +135,13 @@ let subAuxBody = fun funBody funName statVars dynVars loc ->
             in aux argList
           in let e = Exp.apply ~loc ~attrs:[] fn' argList' in
           if fname = funName then applyEsc e loc else e
+      | {pexp_desc = Pexp_construct (lid, constrExpOpt); pexp_loc = loc} ->
+          begin match constrExpOpt with
+            None -> Exp.construct ~loc ~attrs:[] lid None
+            | Some exp -> Exp.construct ~loc ~attrs:[] lid (Some (sub exp inEsc)) 
+          end
+      | {pexp_desc = Pexp_tuple es; pexp_loc = loc} ->
+          Exp.tuple ~loc ~attrs:[] (List.map (fun e -> sub e inEsc) es)
       | {pexp_desc = Pexp_ident {txt = Lident v; loc = loc}} ->
           if not inEsc && (List.exists (fun dv -> v=dv) dynVars)
             then applyEsc funBody loc
@@ -146,6 +172,12 @@ let subRecCall = fun funBody funName statVars ->
             None -> Exp.ifthenelse ~loc ~attrs:[] cond (sub thenExp) None
             | Some elseExp -> Exp.ifthenelse ~loc ~attrs:[] cond (sub thenExp) (Some (sub elseExp))
           end
+      | {pexp_desc = Pexp_match (condExp, pattExpList); pexp_loc = loc} ->
+          Exp.match_ ~loc ~attrs:[] condExp 
+            (List.map 
+               (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} -> 
+                  {pc_lhs = lhs; pc_guard = guard; pc_rhs = sub rhs}) 
+               pattExpList)
       | {pexp_desc = Pexp_apply (fn, argList); pexp_loc = loc} ->
           let fname = 
             begin match fn with 
@@ -169,6 +201,13 @@ let subRecCall = fun funBody funName statVars ->
                       | exp -> (lbl, sub exp)::(aux args)
             in aux argList
          in Exp.apply ~loc ~attrs:[] fn' argList'
+      | {pexp_desc = Pexp_construct (lid, constrExpOpt); pexp_loc = loc} ->
+          begin match constrExpOpt with
+            None -> Exp.construct ~loc ~attrs:[] lid None
+            | Some exp -> Exp.construct ~loc ~attrs:[] lid (Some (sub exp)) 
+          end
+      | {pexp_desc = Pexp_tuple es; pexp_loc = loc} ->
+          Exp.tuple ~loc ~attrs:[] (List.map (fun e -> sub e) es)
       | exp -> exp
   in sub funBody
 

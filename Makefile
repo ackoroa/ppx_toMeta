@@ -1,7 +1,8 @@
 squall: ppx sample
 
-sample: ppx foo.ml
+foo: ppx foo.ml
 	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native foo.ml > temp.ml
+	cat temp.ml
 	metaocamlc -dsource temp.ml
 	rm *.cmi *.cmo *.out temp.ml
 
@@ -10,15 +11,20 @@ ppx: ppx_toMeta.ml
 
 test: ppx test_toMeta.ml
 	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native test_toMeta.ml > test_res.ml
+	#uncomment below lines to prettyprint result
+	metaocamlc -dsource test_res.ml
+	rm *.cmi *.cmo *.out
 
 ast:
 	ocamlfind ppx_tools/dumpast foo.ml
 
 tAst:
-	ocamlfind ppx_tools/dumpast bar.ml
+	metaocamlc -dparsetree bar.ml
+	rm *.cmi *.cmo *.out
 
 cAst: ppx
-	ocamlfind ppx_tools/dumpast -ppx ./ppx_toMeta.native foo.ml
+	metaocamlc -dparsetree -ppx ./ppx_toMeta.native foo.ml
+	rm *.cmi *.cmo *.out
 
 clean:
 	rm *.cmi *.cmo *~ *.out *.orig
