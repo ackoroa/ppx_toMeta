@@ -10,10 +10,12 @@ let applyFun = fun funTarget funName loc ->
     [("", funTarget)]
 
 let applyLift = fun funTarget loc ->
-  applyFun funTarget "_l" loc
+  (*applyFun funTarget "_l" loc*)
+  Exp.mk ~loc ~attrs:[({txt = "metaocaml.bracket"; loc = loc}, PStr [])] funTarget.pexp_desc
 
 let applyEsc = fun funTarget loc ->
-  applyFun funTarget "_e" loc
+  (* applyFun funTarget "_e" loc *)
+  Exp.mk ~loc ~attrs:[({txt = "metaocaml.escape"; loc = loc}, PStr [])] funTarget.pexp_desc
 
 let isRecursive = fun funDef ->
   match funDef with
