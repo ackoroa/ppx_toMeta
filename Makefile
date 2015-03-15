@@ -2,7 +2,7 @@ squall: ppx sample
 
 foo: ppx foo.ml
 	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native foo.ml > temp.ml
-	cat temp.ml
+	#cat temp.ml
 	metaocamlc -dsource temp.ml
 	rm *.cmi *.cmo *.out temp.ml
 
