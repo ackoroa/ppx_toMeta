@@ -40,12 +40,12 @@ let rec double_xsStat xs =
 
 let rec ff x n =
   if x = 0 then 0 else pow x n + ff (x-1) 
-let rec ff x n =
-  if x = 0 then 0 else pow_xStat x n + ff (x-1) 
+let rec ff_xStat x n =
+  if x = 0 then 0 else pow_xStat x n + ff_xStat (x-1) 
 [@@x]
-let rec ff x n =
-  if x = 0 then 0 else pow_nStat x n + ff (x-1) 
+let rec ff_nStat x n =
+  if x = 0 then 0 else pow_nStat x n + ff_nStat (x-1) 
 [@@n]
-let rec ff x n =
-  if x = 0 then 0 else pow_xnStat x n + ff (x-1) 
+let rec ff_xnStat x n =
+  if x = 0 then 0 else pow_xnStat x n + ff_xnStat (x-1) 
 [@@x][@@n]
