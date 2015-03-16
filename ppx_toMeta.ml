@@ -237,8 +237,8 @@ let subUsedStagedFun = fun funBody funName usedStagedFun ->
                            match exp with
                              {pexp_desc = Pexp_ident {txt = Lident v}} ->
                                if List.exists (fun sv -> sv=v) sfsv
-                                 then (lbl, exp)::(aux args)
-                                 else aux args
+                                 then aux args
+                                 else (lbl, exp)::(aux args)
                        | exp -> (lbl, sub exp)::(aux args)
                    in aux argList
               else List.map (fun (lbl, exp) -> (lbl, sub exp)) argList

@@ -4,7 +4,7 @@ foo: ppx foo.ml
 	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native foo.ml > temp.ml
 	#cat temp.ml
 	metaocamlc -dsource temp.ml
-	rm *.cmi *.cmo *.out temp.ml
+	rm *.cmi *.cmo *.out
 
 ppx: ppx_toMeta.ml
 	ocamlbuild -package compiler-libs.common ppx_toMeta.native
@@ -27,5 +27,5 @@ cAst: ppx
 	rm *.cmi *.cmo *.out
 
 clean:
-	rm *.cmi *.cmo *~ *.out *.orig
+	rm *.cmi *.cmo *~ *.out *.orig temp.ml test_res.ml
 
