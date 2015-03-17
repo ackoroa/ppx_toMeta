@@ -1,2 +1,1 @@
 1. Control structure inside control structure causes problems
-2. How to link functions that uses other staged function in the aux code generator?
