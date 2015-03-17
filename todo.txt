@@ -1,1 +1,2 @@
 1. Control structure inside control structure causes problems
+2. Static variable (non-control) that is modified during staged recursive call?
