@@ -52,12 +52,33 @@ let getAttrList = fun funDef ->
       (List.hd value_binding_list).pvb_attributes
     | _ -> failwith "not a function definition"
 
+let hasToMetaAnnot = fun funDef ->
+  let attrList = getAttrList funDef in
+  let rec aux attrs =
+    match attrs with
+      [] -> false
+      | ({txt = "static"}, _)::_ -> true
+      | _::attrs -> aux attrs
+  in aux attrList
+
 let getStatVars = fun funDef ->
   let attrList = getAttrList funDef in
   let rec aux attrs =
     match attrs with
       [] -> []
-      | ({txt = var}, _)::attrs -> var::(aux attrs)
+      | ({txt = "static"}, PStr [{pstr_desc = Pstr_eval (construct, _)}])::attrs ->
+          let rec aux2 construct =
+            begin match construct with
+              | Pexp_construct ({txt = Lident "[]"}, None) -> []
+              | Pexp_construct ({txt = Lident "::"}, 
+                                Some {pexp_desc = Pexp_tuple [{pexp_desc = Pexp_ident {txt = Lident v}}; construct]}) ->
+                  v::(aux2 construct.pexp_desc)
+              | _ -> failwith "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
+            end in
+          let statVars = aux2 construct.pexp_desc in
+          statVars::(aux attrs)
+      | ({txt = "static"}, _)::attrs -> failwith "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
+      | _::attrs -> aux attrs
   in aux attrList
 
 let getUsedStagedFun = fun funBody ->
@@ -381,15 +402,25 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
 
 let toMeta_mapper argv =
   { default_mapper with
-    structure_item = fun mapper structure_item ->
-      match structure_item with
-        {pstr_desc = Pstr_value (_, _)} ->
-          let r = isRecursive structure_item in
-          let vars = getVars structure_item in
-          let statVars = getStatVars structure_item in
-          let dynVars = List.filter (fun v -> not (List.exists (fun sv -> v=sv) statVars)) vars in
-          buildMeta r structure_item vars statVars dynVars
-        | _ -> default_mapper.structure_item mapper structure_item
+    structure = fun mapper structure_item_list ->
+      let structure_item_mapper = fun mapper structure_item ->  
+        match structure_item with
+          {pstr_desc = Pstr_value (_, _)} ->
+              if hasToMetaAnnot structure_item 
+                then
+                  let r = isRecursive structure_item in
+                  let vars = getVars structure_item in 
+                  let statVarVariants = getStatVars structure_item in
+                  let rec aux svvs =
+                    match svvs with
+                      [] -> []
+                      | statVars::svvs ->
+                          let dynVars = List.filter (fun v -> not (List.exists (fun sv -> v=sv) statVars)) vars in
+                          (buildMeta r structure_item vars statVars dynVars)::(aux svvs)
+                  in aux statVarVariants
+                else [default_mapper.structure_item mapper structure_item]
+          | _ -> [default_mapper.structure_item mapper structure_item]
+      in List.flatten (List.map (structure_item_mapper mapper) structure_item_list)
   }
 
 let () = register "toMeta" toMeta_mapper
