@@ -4,7 +4,8 @@ open Asttypes
 open Parsetree
 open Longident
 
-let stagedFunList = ref []
+let msg_syntaxErrorDecl = "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
+let msg_syntaxErrorUse = "Syntax error for toMeta annotation. Annotation is of the form [@static,use <statVars>] where statVars = [] | sv::statVars"
 
 let applyFun = fun funTargets funName loc ->
   Exp.apply ~loc ~attrs:[]
@@ -24,6 +25,9 @@ let applyEsc = fun escTarget loc ->
 
 let applyRun = fun runTarget loc ->
   applyFun [runTarget] "Runcode.run" loc
+
+let getStagedName = fun fname statVars ->
+  fname^"_"^(List.fold_left (fun acc v -> acc^v) "" statVars)
 
 let isRecursive = fun funDef ->
   match funDef with
@@ -73,11 +77,11 @@ let getStatVars = fun funDef ->
               | Pexp_construct ({txt = Lident "::"}, 
                                 Some {pexp_desc = Pexp_tuple [{pexp_desc = Pexp_ident {txt = Lident v}}; construct]}) ->
                   v::(aux2 construct.pexp_desc)
-              | _ -> failwith "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
+              | _ -> failwith msg_syntaxErrorDecl
             end in
           let statVars = aux2 construct.pexp_desc in
           statVars::(aux attrs)
-      | ({txt = "static"}, _)::attrs -> failwith "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
+      | ({txt = "static"}, _)::attrs -> failwith msg_syntaxErrorDecl
       | _::attrs -> aux attrs
   in aux attrList
 
@@ -91,14 +95,31 @@ let getUsedStagedFun = fun funBody ->
           end
       | {pexp_desc = Pexp_match (condExp, pattExpList)} ->
           (getUsf condExp)@(List.flatten (List.map (fun {pc_rhs = rhs} -> getUsf rhs) pattExpList))
-      | {pexp_desc = Pexp_apply (fn, argList)} ->
+      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs} ->
           let fname = 
             begin match fn with 
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
               | _ -> failwith "not a valid function identifier"
             end in
-          let usedHere = if List.exists (fun (sfn, _) -> fname=sfn) !stagedFunList then [fname] else [] in
-          let usedInArgs = List.flatten (List.map (fun (_,exp) -> getUsf exp) argList) in 
+          let usedHere =
+            let rec aux attrs = 
+              match attrs with
+                [] -> []
+                | ({txt = "static.use"}, PStr [{pstr_desc = Pstr_eval (construct, _)}])::_ ->
+                    let rec aux2 construct =
+                      begin match construct with
+                        | Pexp_construct ({txt = Lident "[]"}, None) -> []
+                        | Pexp_construct ({txt = Lident "::"}, 
+                                          Some {pexp_desc = Pexp_tuple [{pexp_desc = Pexp_ident {txt = Lident v}}; construct]}) ->
+                            v::(aux2 construct.pexp_desc)
+                        | _ -> failwith msg_syntaxErrorUse
+                      end in
+                    let sfsvs = aux2 construct.pexp_desc in
+                    [(fname, sfsvs)]
+                | ({txt = "static.use"}, _)::_ -> failwith msg_syntaxErrorUse
+                | _::attrs -> aux attrs
+            in aux attrs in
+          let usedInArgs = List.flatten (List.map (fun (_,exp) -> getUsf exp) argList) in
           usedHere@usedInArgs
       | {pexp_desc = Pexp_construct (lid, constrExpOpt)} ->
           begin match constrExpOpt with
@@ -109,13 +130,6 @@ let getUsedStagedFun = fun funBody ->
           List.flatten (List.map (fun e -> getUsf e) es)
       | exp -> []
   in getUsf funBody
-
-let getStagedFunStatVars = fun usfn ->
-  let rec aux sfs =
-    match sfs with
-      [] -> failwith "used staged function doesn't exists?"
-      | (sfn, sfsv)::sfs -> if sfn=usfn then sfsv else aux sfs 
-  in aux !stagedFunList
 
 let rec removeArguments funBody n =
   if n = 0
@@ -251,19 +265,27 @@ let subUsedStagedFun = fun funBody usedStagedFun ->
             in aux usedStagedFun in 
           let argList' = 
             if isStagedFun
-              then let rec aux args =
-                     match args with
-                       [] -> []
-                       | (lbl, exp)::args ->
-                           match exp with
-                             {pexp_desc = Pexp_ident {txt = Lident v}} ->
-                               if List.exists (fun sv -> sv=v) sfsv
-                                 then aux args
-                                 else (lbl, exp)::(aux args)
-                       | exp -> (lbl, sub exp)::(aux args)
-                   in aux argList
+              then 
+                let rec aux args =
+                  match args with
+                    [] -> []
+                    | (lbl, exp)::args ->
+                        match exp with
+                          {pexp_desc = Pexp_ident {txt = Lident v}} ->
+                            if List.exists (fun sv -> sv=v) sfsv
+                              then aux args
+                              else (lbl, exp)::(aux args)
+                    | exp -> (lbl, sub exp)::(aux args)
+                in aux argList
               else List.map (fun (lbl, exp) -> (lbl, sub exp)) argList
-          in Exp.apply ~loc ~attrs fn argList'
+          in let attrs' =
+            let rec aux attrs = 
+              match attrs with
+                [] -> []
+                | ({txt = "static.use"}, _)::attrs -> attrs
+                | attr::attrs -> attr::(aux attrs)
+            in aux attrs in
+          Exp.apply ~loc ~attrs:attrs' fn argList'
       | {pexp_desc = Pexp_construct (lid, constrExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
           begin match constrExpOpt with
             None -> Exp.construct ~loc ~attrs lid None
@@ -372,7 +394,7 @@ let getStagedBody = fun funBody loc vars statVars dynVars funRec funName usedSta
             let declBody = 
               applyRun (applyLift (applyEsc (applyFun 
                 (List.map (fun v -> Exp.ident ~loc ~attrs:[] {txt = Lident v; loc = loc}) usfsv)
-                (usfn^"S") loc) loc) loc) loc
+                (getStagedName usfn usfsv) loc) loc) loc) loc
             in Exp.let_ ~loc ~attrs:[] Nonrecursive
                  [Vb.mk ~loc ~attrs:[]
                    (Pat.var ~loc ~attrs:[] {loc = loc; txt = usfn})
@@ -392,12 +414,10 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
     match (List.hd f).pvb_pat with 
       {ppat_desc = Ppat_var {txt = fn}} -> fn
       | _ -> failwith "not a valid fun name pattern"
-  in let stagedName = Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = (funName^"S")} in
+  in let stagedName = Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = getStagedName funName statVars} in
   let funBody = removeArguments (List.hd f).pvb_expr (List.length vars) in
   let usedStagedFun = getUsedStagedFun funBody in
-  let usedStagedFunWithVars = List.map (fun sfn -> (sfn, getStagedFunStatVars sfn)) usedStagedFun in
-  let stagedBody = getStagedBody funBody vbLoc vars statVars dynVars funRec funName usedStagedFunWithVars in
-  stagedFunList := (funName, statVars)::(!stagedFunList);
+  let stagedBody = getStagedBody funBody vbLoc vars statVars dynVars funRec funName usedStagedFun in
   Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName stagedBody]
 
 let toMeta_mapper argv =
