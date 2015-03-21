@@ -105,18 +105,7 @@ let getUsedStagedFun = fun funBody ->
             let rec aux attrs = 
               match attrs with
                 [] -> []
-                | ({txt = "static.use"}, PStr [{pstr_desc = Pstr_eval (construct, _)}])::_ ->
-                    let rec aux2 construct =
-                      begin match construct with
-                        | Pexp_construct ({txt = Lident "[]"}, None) -> []
-                        | Pexp_construct ({txt = Lident "::"}, 
-                                          Some {pexp_desc = Pexp_tuple [{pexp_desc = Pexp_ident {txt = Lident v}}; construct]}) ->
-                            v::(aux2 construct.pexp_desc)
-                        | _ -> failwith msg_syntaxErrorUse
-                      end in
-                    let sfsvs = aux2 construct.pexp_desc in
-                    [(fname, sfsvs)]
-                | ({txt = "static.use"}, _)::_ -> failwith msg_syntaxErrorUse
+                | ({txt = "static.use"}, _)::_ -> [fname]
                 | _::attrs -> aux attrs
             in aux attrs in
           let usedInArgs = List.flatten (List.map (fun (_,exp) -> getUsf exp) argList) in
@@ -237,7 +226,7 @@ let buildAuxCall = fun vars statVars dynVars loc ->
       newBodyArgs
   in applyEsc newBody loc
 
-let subUsedStagedFun = fun funBody usedStagedFun ->
+let subUsedStagedFun = fun funBody usedStagedFun statVars ->
   let rec sub funBody =
     match funBody with
       {pexp_desc = Pexp_ifthenelse (cond, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
@@ -257,11 +246,11 @@ let subUsedStagedFun = fun funBody usedStagedFun ->
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
               | _ -> failwith "not a valid function identifier"
             end in
-          let (isStagedFun, sfsv) =
+          let isStagedFun =
             let rec aux sfs = 
               match sfs with
-                [] -> (false, [])
-                | (sfn, sfsv)::sfs -> if fname = sfn then (true, sfsv) else aux sfs
+                [] -> false
+                | sfn::sfs -> if fname = sfn then true else aux sfs
             in aux usedStagedFun in 
           let argList' = 
             if isStagedFun
@@ -272,7 +261,7 @@ let subUsedStagedFun = fun funBody usedStagedFun ->
                     | (lbl, exp)::args ->
                         match exp with
                           {pexp_desc = Pexp_ident {txt = Lident v}} ->
-                            if List.exists (fun sv -> sv=v) sfsv
+                            if List.exists (fun sv -> sv=v) statVars
                               then aux args
                               else (lbl, exp)::(aux args)
                     | exp -> (lbl, sub exp)::(aux args)
@@ -369,7 +358,7 @@ let getStagedBody = fun funBody loc vars statVars dynVars funRec funName usedSta
       else funBody
   in let toStageBody' =
     if (List.length usedStagedFun) > 0 
-      then subUsedStagedFun toStageBody usedStagedFun 
+      then subUsedStagedFun toStageBody usedStagedFun statVars
       else toStageBody
   in let stagedBody = buildStagedBody (funRec && (not useAux)) 
                         statVars dynVars toStageBody' funName loc
@@ -378,7 +367,7 @@ let getStagedBody = fun funBody loc vars statVars dynVars funRec funName usedSta
       then let auxBody = subAuxBody funBody funName statVars dynVars loc in
            let auxBody' =
              if (List.length usedStagedFun) > 0 
-               then subUsedStagedFun auxBody usedStagedFun 
+               then subUsedStagedFun auxBody usedStagedFun statVars
                else auxBody
            in Exp.let_ ~loc ~attrs:[] Recursive
              [Vb.mk ~loc ~attrs:[]
@@ -390,11 +379,11 @@ let getStagedBody = fun funBody loc vars statVars dynVars funRec funName usedSta
     let rec aux usfs = 
       match usfs with
         [] -> fullBody
-        | (usfn, usfsv)::usfs ->
+        | usfn::usfs ->
             let declBody = 
               applyRun (applyLift (applyEsc (applyFun 
-                (List.map (fun v -> Exp.ident ~loc ~attrs:[] {txt = Lident v; loc = loc}) usfsv)
-                (getStagedName usfn usfsv) loc) loc) loc) loc
+                (List.map (fun v -> Exp.ident ~loc ~attrs:[] {txt = Lident v; loc = loc}) statVars)
+                (getStagedName usfn statVars) loc) loc) loc) loc
             in Exp.let_ ~loc ~attrs:[] Nonrecursive
                  [Vb.mk ~loc ~attrs:[]
                    (Pat.var ~loc ~attrs:[] {loc = loc; txt = usfn})
