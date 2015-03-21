@@ -426,7 +426,7 @@ let toMeta_mapper argv =
                       | statVars::svvs ->
                           let dynVars = List.filter (fun v -> not (List.exists (fun sv -> v=sv) statVars)) vars in
                           (buildMeta r structure_item vars statVars dynVars)::(aux svvs)
-                  in aux statVarVariants
+                  in (default_mapper.structure_item mapper structure_item)::(aux statVarVariants)
                 else [default_mapper.structure_item mapper structure_item]
           | _ -> [default_mapper.structure_item mapper structure_item]
       in List.flatten (List.map (structure_item_mapper mapper) structure_item_list)
