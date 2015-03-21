@@ -1,2 +1,12 @@
 1. Control structure inside control structure causes problems
 2. Static variable (non-control) that is modified during staged recursive call?
+
+return original instead of letting it go unsound
+generate the diff variants amd detect which is used
+
+Automated meta-programming using Ocaml
+Automated staging of ocaml prog
+
+report bg on diff tools
+
+High performance DSL via Ocaml
