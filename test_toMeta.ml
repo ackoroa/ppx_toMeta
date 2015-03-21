@@ -15,17 +15,5 @@ let rec double xs =
 [@@static []] [@@static [xs]]
 
 let rec ff x n =
-  if x = 0 then 0 else pow x n [@static.use []] + ff (x-1) n
-[@@static []]
-
-let rec ff x n =
-  if x = 0 then 0 else pow x n [@static.use [x]] + ff (x-1) n
-[@@static [x]]
-
-let rec ff x n =
-  if x = 0 then 0 else pow x n [@static.use [n]] + ff (x-1) n
-[@@static [n]] 
-
-let rec ff x n =
-  if x = 0 then 0 else pow x n [@static.use [x;n]] + ff (x-1) n
-[@@static [x;n]]
+  if x = 0 then 0 else pow x n [@static.use] + ff (x-1) n
+[@@static []] [@@static [x]] [@@static [n]] [@@static [x;n]]
