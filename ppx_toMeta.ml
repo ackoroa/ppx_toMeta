@@ -99,7 +99,7 @@ let getUsedStagedFun = fun funBody ->
           let fname = 
             begin match fn with 
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
-              | _ -> failwith "not a valid function identifier"
+              | _ -> "_AnonFun"
             end in
           let usedHere =
             let rec aux attrs = 
@@ -183,7 +183,7 @@ let subAuxBody = fun funBody funName statVars dynVars loc ->
           let fname = 
             begin match fn with 
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
-              | _ -> failwith "not a valid function identifier"
+              | _ -> "_AnonFun"
             end in
           let fn' = 
             if fname = funName
@@ -244,7 +244,7 @@ let subUsedStagedFun = fun funBody usedStagedFun statVars ->
           let fname = 
             begin match fn with 
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
-              | _ -> failwith "not a valid function identifier"
+              | _ -> "_AnonFun"
             end in
           let isStagedFun =
             let rec aux sfs = 
@@ -303,7 +303,7 @@ let subRecCall = fun funBody funName statVars ->
           let fname = 
             begin match fn with 
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
-              | _ -> failwith "not a valid function identifier"
+              | _ -> "_AnonFun"
             end in
           let argList' = 
             let rec aux args =
@@ -351,11 +351,9 @@ let buildStagedBody = fun funRec statVars dynVars funBody funName loc ->
 let getStagedBody = fun funBody loc vars statVars dynVars funRec funName usedStagedFun ->
   let useAux = isControlVarStatic statVars funBody in
   let toStageBody =
-    if funRec
-      then if useAux
-             then buildAuxCall vars statVars dynVars loc
-             else subRecCall funBody funName statVars
-      else funBody
+    if useAux
+      then buildAuxCall vars statVars dynVars loc
+      else subRecCall funBody funName statVars
   in let toStageBody' =
     if (List.length usedStagedFun) > 0 
       then subUsedStagedFun toStageBody usedStagedFun statVars
