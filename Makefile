@@ -6,6 +6,11 @@ foo: ppx foo.ml
 	metaocamlc -dsource temp.ml
 	rm *.cmi *.cmo *.out
 
+intr: ppx interpreter.ml interpreter_defs.ml
+	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native interpreter.ml > temp.ml
+	metaocamlc interpreter_defs.ml	
+	metaocamlc -dsource interpreter.ml
+
 ppx: ppx_toMeta.ml
 	ocamlbuild -package compiler-libs.common ppx_toMeta.native
 
