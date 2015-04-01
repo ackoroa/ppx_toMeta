@@ -7,6 +7,11 @@ open Longident
 let msg_syntaxErrorDecl = "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
 let msg_syntaxErrorUse = "Syntax error for toMeta annotation. Annotation is of the form [@static,use <statVars>] where statVars = [] | sv::statVars"
 
+let idx = ref 0
+let fresh v =
+  idx <- !idx + 1;
+  v^"_"^(string_of_int !idx)
+
 let applyFun = fun funTargets funName loc ->
   Exp.apply ~loc ~attrs:[]
     (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident funName})
@@ -34,6 +39,23 @@ let isRecursive = fun funDef ->
     {pstr_desc = Pstr_value (Nonrecursive, _)} -> false
     | {pstr_desc = Pstr_value (Recursive, _)} -> true
     | _ -> failwith "not a function definition"
+    
+let isStaticExp exp statVars =
+  let rec aux exp = 
+    match exp with
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
+          let elseStat =
+            begin match elseExpOpt with
+              None -> true
+              | Some exp -> aux exp
+            end in
+          (aux condExp) && (aux thenExp) && elseStat
+      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
+          List.fold_left (fun acc (_, exp) -> acc && (aux exp)) true argList
+      | {pexp_desc = Pexp_ident {txt = Lident v; loc = loc}} ->
+          List.exists (fun sv -> sv=v) statVars
+      | exp -> true
+  in aux exp
 
 let getVars = fun funDef ->
   let pvb_expr = 
