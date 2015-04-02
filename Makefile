@@ -1,21 +1,23 @@
+PPX = ppx_toMeta1
+
 squall: ppx sample
 
 foo: ppx foo.ml
-	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native foo.ml > temp.ml
+	ocamlfind ppx_tools/rewriter ./$(PPX).native foo.ml > temp.ml
 	#cat temp.ml
 	metaocamlc -dsource temp.ml
 	rm *.cmi *.cmo *.out
 
 intr: ppx interpreter.ml interpreter_defs.ml
-	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native interpreter.ml > temp.ml
+	ocamlfind ppx_tools/rewriter ./$(PPX).native interpreter.ml > temp.ml
 	metaocamlc interpreter_defs.ml	
 	metaocamlc -dsource interpreter.ml
 
-ppx: ppx_toMeta.ml
-	ocamlbuild -package compiler-libs.common ppx_toMeta.native
+ppx: $(PPX).ml
+	ocamlbuild -package compiler-libs.common $(PPX).native
 
 test: ppx test_toMeta.ml
-	ocamlfind ppx_tools/rewriter ./ppx_toMeta.native test_toMeta.ml > test_res.ml
+	ocamlfind ppx_tools/rewriter ./$(PPX).native test_toMeta.ml > test_res.ml
 	#uncomment below lines to prettyprint result
 	metaocamlc -dsource test_res.ml
 	rm *.cmi *.cmo *.out
@@ -28,7 +30,7 @@ tAst:
 	rm *.cmi *.cmo *.out
 
 cAst: ppx
-	metaocamlc -dparsetree -ppx ./ppx_toMeta.native foo.ml
+	metaocamlc -dparsetree -ppx ./$(PPX).native foo.ml
 	rm *.cmi *.cmo *.out
 
 clean:
