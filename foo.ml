@@ -1,2 +1,5 @@
-let rec pow x n = if n=0 then 1 else x * (pow x (n-1)) 
-[@@static []][@@static [x]][@@static [n]][@@static [x;n]]
+let f x y =
+  if x = 0
+    then if y = 0 then true else false
+    else false
+[@@static [y]] [@@static [x;y]] 
