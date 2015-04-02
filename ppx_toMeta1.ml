@@ -291,6 +291,32 @@ let buildLetBoundStagedBody = fun funRec statVars dynVars funBody funName loc ->
       (Exp.ident ~loc ~attrs:[] {txt = Lident funName; loc = loc})
   in applyLift letBody loc
   
+let recCallExists funName funBody =
+  let rec aux exp =
+    match exp with
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
+          let existInElse = 
+            begin match elseExpOpt with
+              None -> false
+              | Some elseExp -> aux elseExp
+            end in
+          (aux condExp) || (aux thenExp) || existInElse
+      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
+          let fname = 
+            begin match fn with 
+              {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
+              | _ -> "_AnonFun"
+            end in
+          let existInArgs = 
+            let rec aux1 args =
+              match args with
+                [] -> false
+                | (lbl, exp)::args -> (aux exp) || (aux1 args)
+            in aux1 argList
+          in existInArgs || (fname = funName)
+      | exp -> false
+  in aux funBody
+
 let buildMeta = fun funRec funDef vars statVars dynVars -> 
   let strLoc = funDef.pstr_loc in
   let f = 
@@ -307,7 +333,7 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
   let (auxs, stagedBody) = buildStagedBody funBody vars statVars dynVars funName false vbLoc in
   let cleanedStagedBody = cleanMetaFun stagedBody in
   let letBoundStagedBody = buildLetBoundStagedBody 
-                             funRec
+                             (funRec && (recCallExists funName cleanedStagedBody))
                              statVars dynVars cleanedStagedBody funName vbLoc
   in let stagedBodyWithAux =
     let rec attachAuxs auxs =
