@@ -129,24 +129,7 @@ let getStatVarIdxs = fun vars statVars ->
                        vars
   in List.filter (fun i -> i >= 0) idxs
 
-let extractUseMetaPayload = fun payload ->
-  match payload with
-    PStr [{pstr_desc = Pstr_eval (construct, _)}] ->
-        let rec aux construct =
-          begin match construct with
-            | Pexp_construct ({txt = Lident "[]"}, None) -> []
-            | Pexp_construct ({txt = Lident "::"}, 
-                                Some {pexp_desc = 
-                                        Pexp_tuple [{pexp_desc = Pexp_constant (Const_int idx)}; 
-                                      construct]}) ->
-                idx::(aux construct.pexp_desc)
-            | _ -> failwith msg_syntaxErrorUse
-          end in
-        aux construct.pexp_desc
-    | _ -> failwith msg_syntaxErrorUse
-
-
-let getUsedStagedFun = fun funBody ->
+let getUsedStagedFun = fun funBody statVars ->
   let rec getUsf funBody =
     match funBody with
       {pexp_desc = Pexp_ifthenelse (cond, thenExp, elseExpOpt)} ->
@@ -167,8 +150,17 @@ let getUsedStagedFun = fun funBody ->
               match attrs with
                 [] -> []
                 | ({txt = "static.use"}, payload)::_ -> 
-                    let statVarIdxs = extractUseMetaPayload payload in
-                    [(fname, statVarIdxs)]
+                    let isArgStatic = 
+                      List.map 
+                        (fun (_, exp) -> (isStaticExp exp statVars, exp)) 
+                        argList
+                    in let statVarIdxs = 
+                      List.filter 
+                        (fun (i, _) -> i >= 0) 
+                        (List.mapi 
+                           (fun idx (isStat, arg) -> if isStat then (idx, arg) else (-1, arg))
+                           isArgStatic)
+                    in [(fname, statVarIdxs)]
                 | _::attrs -> aux attrs
             in aux attrs
           in let usedInArgs = List.flatten (List.map (fun (_, exp) -> getUsf exp) argList) in
@@ -508,12 +500,22 @@ let attachDecls = fun usedStagedFun mainBody loc ->
   let rec attach usfs =
     match usfs with
       [] -> mainBody
-      | (ufn, ufsvidxs)::usfs -> 
-        let (fn, sfn, svs, svidxs) = 
-          List.find (fun (fn, sfn, svs, svidxs) -> (fn=ufn) && (svidxs=ufsvidxs)) !stagedFun in
-        let declBody = 
+      | (ufn, ufsvidxs_ufargs)::usfs ->
+        let ufsvidxs = List.map (fun (idx, arg) -> idx) ufsvidxs_ufargs in 
+        let (fn, sfn, svidxs) = 
+          List.find 
+            (fun (fn, _, svidxs) -> (fn=ufn) && (svidxs=ufsvidxs)) 
+            !stagedFun
+        in let declBody = 
           applyRun (applyLift (applyEsc (applyFun 
-            (List.map (fun v -> Exp.ident ~loc ~attrs:[] {txt = Lident v; loc = loc}) svs)
+            (List.map 
+               (fun idx -> 
+                  let (i,a) = 
+                    List.find 
+                      (fun (i,a) -> i=idx) 
+                      ufsvidxs_ufargs
+                  in a)
+               svidxs)
             sfn loc) loc) loc) loc
         in Exp.let_ ~loc ~attrs:[] Nonrecursive
              [Vb.mk ~loc ~attrs:[]
@@ -536,7 +538,7 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
   
   in let stagedName = Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = getStagedName funName statVars} in
   let funBody = removeArguments (List.hd f).pvb_expr (List.length vars) in
-  let usedStagedFun = getUsedStagedFun funBody in
+  let usedStagedFun = getUsedStagedFun funBody statVars in
   let (auxs, stagedBody) = buildStagedBody funBody vars statVars dynVars usedStagedFun funName false "" vbLoc in
   let cleanedStagedBody = cleanMetaFun stagedBody in
   let letBoundStagedBody = buildLetBoundStagedBody 
@@ -545,7 +547,7 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
   in let stagedBodyWithAux = attachAuxs auxs vars letBoundStagedBody vbLoc in
   let stagedBodyWithDecl = attachDecls usedStagedFun stagedBodyWithAux vbLoc in
   let metaFun = buildArgsList statVars stagedBodyWithDecl vbLoc in
-  stagedFun := (funName, getStagedName funName statVars, statVars, getStatVarIdxs vars statVars)::(!stagedFun);
+  stagedFun := (funName, getStagedName funName statVars, getStatVarIdxs vars statVars)::(!stagedFun);
   Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName metaFun]
 
 let toMeta_mapper argv =
