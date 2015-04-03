@@ -115,7 +115,7 @@ let rec removeArguments funBody n =
         {pexp_desc = Pexp_fun (_, _, _, funBody)} -> removeArguments funBody (n-1)
         | _ -> failwith "arguments missing?"
 
-let buildAuxCall = fun vars dynVars loc ->
+let buildAuxCall = fun auxName vars dynVars loc ->
   let newBodyArgs =
     List.map
       (fun v ->
@@ -125,19 +125,19 @@ let buildAuxCall = fun vars dynVars loc ->
              else ("", identExp))
       vars
   in Exp.apply ~loc ~attrs:[] 
-       (Exp.ident ~loc ~attrs:[] {txt = Lident "aux"; loc = loc})
+       (Exp.ident ~loc ~attrs:[] {txt = Lident auxName; loc = loc})
        newBodyArgs
   
-let rec buildAuxBody = fun funBody vars statVars dynVars funName loc ->
+let rec buildAuxBody = fun funBody vars statVars dynVars funName auxName loc ->
   let rec sub exp inEsc =
     match exp with
       {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          let (thenAux, thenExp') = buildStagedBody thenExp vars statVars dynVars funName true loc in
+          let (thenAux, thenExp') = buildStagedBody thenExp vars statVars dynVars funName true auxName loc in
           let (elseAux, elseExpOpt') = 
             begin match elseExpOpt with
               None -> ([], None)
               | Some elseExp -> 
-                  let (aux, e) = buildStagedBody elseExp vars statVars dynVars funName true loc in
+                  let (aux, e) = buildStagedBody elseExp vars statVars dynVars funName true auxName loc in
                   (aux, Some e)
             end in
           Exp.ifthenelse ~loc ~attrs condExp thenExp' elseExpOpt'
@@ -149,7 +149,7 @@ let rec buildAuxBody = fun funBody vars statVars dynVars funName loc ->
             end in
           let fn' = 
             if fname = funName
-              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "aux"}
+              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident auxName}
               else fn
           in let argList' = 
             let rec aux args =
@@ -166,15 +166,16 @@ let rec buildAuxBody = fun funBody vars statVars dynVars funName loc ->
       | exp -> exp
   in sub funBody false
  
-and buildStagedBody = fun funBody vars statVars dynVars funName inAux loc ->
+and buildStagedBody = fun funBody vars statVars dynVars funName inAux auxName loc ->
   let rec stage exp inEsc =
     match exp with
       {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
           if isStaticExp condExp statVars
             then
-              let auxBody = buildAuxBody exp vars statVars dynVars funName loc in
-              let auxCall = buildAuxCall vars dynVars loc in
-              ([auxBody], auxCall)
+              let auxName = fresh "aux" in
+              let auxBody = buildAuxBody exp vars statVars dynVars funName auxName loc in
+              let auxCall = buildAuxCall auxName vars dynVars loc in
+              ([(auxName, auxBody)], auxCall)
             else
               let (condAux, condExp') = 
                 let (aux, e) = stage condExp inEsc in 
@@ -201,7 +202,7 @@ and buildStagedBody = fun funBody vars statVars dynVars funName inAux loc ->
             end in
           let fn' = 
             if inAux && (fname = funName)
-              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "aux"}
+              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident auxName}
               else fn
           in let aux_stagedArgs = 
             let rec aux args =
@@ -330,7 +331,7 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
       | _ -> failwith "not a valid fun name pattern"
   in let stagedName = Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = getStagedName funName statVars} in
   let funBody = removeArguments (List.hd f).pvb_expr (List.length vars) in
-  let (auxs, stagedBody) = buildStagedBody funBody vars statVars dynVars funName false vbLoc in
+  let (auxs, stagedBody) = buildStagedBody funBody vars statVars dynVars funName false "" vbLoc in
   let cleanedStagedBody = cleanMetaFun stagedBody in
   let letBoundStagedBody = buildLetBoundStagedBody 
                              (funRec && (recCallExists funName cleanedStagedBody))
@@ -339,11 +340,11 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
     let rec attachAuxs auxs =
       match auxs with
         [] -> letBoundStagedBody
-        | aux::auxs ->
-            let cleanedAux = cleanMetaFun aux in
+        | (auxName, auxBody)::auxs ->
+            let cleanedAux = cleanMetaFun auxBody in
             Exp.let_ ~loc:vbLoc ~attrs:[] Recursive
                [Vb.mk ~loc:vbLoc ~attrs:[]
-                  (Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = "aux"})
+                  (Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = auxName})
                   (buildArgsList vars cleanedAux vbLoc)]
                (attachAuxs auxs)
     in attachAuxs auxs
