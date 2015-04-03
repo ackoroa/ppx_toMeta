@@ -23,6 +23,13 @@ let rec double xs =
     | x::xs -> (2*x)::(double xs)
 [@@static []] [@@static [xs]]
 
-let rec ff x n =
-  if x = 0 then 0 else pow x n [@static.use] + ff (x-1) n
-[@@static []] [@@static [x]] [@@static [n]] [@@static [x;n]]
+let nestedBranchm x y =
+  match x with
+    0 ->
+        begin match y with
+          0 -> "x" 
+          | _ -> "xy"
+        end
+    | _ -> "_"
+[@@static []] [@@static [x]] [@@static [y]] [@@static [x;y]] 
+
