@@ -140,7 +140,8 @@ let rec buildAuxBody = fun funBody vars statVars dynVars funName auxName loc ->
                   let (aux, e) = buildStagedBody elseExp vars statVars dynVars funName true auxName loc in
                   (aux, Some e)
             end in
-          Exp.ifthenelse ~loc ~attrs condExp thenExp' elseExpOpt'
+          let body = Exp.ifthenelse ~loc ~attrs condExp thenExp' elseExpOpt' in
+          (thenAux@elseAux, body)
       | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
           let fname = 
             begin match fn with 
@@ -157,13 +158,15 @@ let rec buildAuxBody = fun funBody vars statVars dynVars funName auxName loc ->
                 [] -> []
                 | (lbl, exp)::args -> (lbl, sub exp (fname = funName))::(aux args)
             in aux argList
-          in let e = Exp.apply ~loc ~attrs fn' argList' in
-          if fname = funName then applyEsc e loc else e
+          in let auxs = List.flatten (List.map (fun (lbl, (aux, arg)) -> aux) argList') in
+          let args = List.map (fun (lbl, (aux, arg)) -> (lbl, arg)) argList' in
+          let e = Exp.apply ~loc ~attrs fn' args in
+          if fname = funName then (auxs, applyEsc e loc) else (auxs, e)
       | {pexp_desc = Pexp_ident {txt = Lident v; loc = loc}} ->
           if not inEsc && (List.exists (fun dv -> v=dv) dynVars)
-            then applyEsc funBody loc
-            else funBody
-      | exp -> exp
+            then ([], applyEsc funBody loc)
+            else ([], funBody)
+      | exp -> ([], exp)
   in sub funBody false
  
 and buildStagedBody = fun funBody vars statVars dynVars funName inAux auxName loc ->
@@ -173,9 +176,9 @@ and buildStagedBody = fun funBody vars statVars dynVars funName inAux auxName lo
           if isStaticExp condExp statVars
             then
               let auxName = fresh "aux" in
-              let auxBody = buildAuxBody exp vars statVars dynVars funName auxName loc in
+              let (auxAux, auxBody) = buildAuxBody exp vars statVars dynVars funName auxName loc in
               let auxCall = buildAuxCall auxName vars dynVars loc in
-              ([(auxName, auxBody)], auxCall)
+              (auxAux@[(auxName, auxBody)], auxCall)
             else
               let (condAux, condExp') = 
                 let (aux, e) = stage condExp inEsc in 
