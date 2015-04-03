@@ -7,6 +7,11 @@ open Longident
 let msg_syntaxErrorDecl = "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
 let msg_syntaxErrorUse = "Syntax error for toMeta annotation. Annotation is of the form [@static,use <statVars>] where statVars = [] | sv::statVars"
 
+let idx = ref 0
+let fresh v =
+  idx := !idx + 1;
+  v^"_"^(string_of_int !idx)
+
 let applyFun = fun funTargets funName loc ->
   Exp.apply ~loc ~attrs:[]
     (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident funName})
@@ -34,6 +39,23 @@ let isRecursive = fun funDef ->
     {pstr_desc = Pstr_value (Nonrecursive, _)} -> false
     | {pstr_desc = Pstr_value (Recursive, _)} -> true
     | _ -> failwith "not a function definition"
+    
+let isStaticExp exp statVars =
+  let rec aux exp = 
+    match exp with
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
+          let elseStat =
+            begin match elseExpOpt with
+              None -> true
+              | Some exp -> aux exp
+            end in
+          (aux condExp) && (aux thenExp) && elseStat
+      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
+          List.fold_left (fun acc (_, exp) -> acc && (aux exp)) true argList
+      | {pexp_desc = Pexp_ident {txt = Lident v; loc = loc}} ->
+          List.exists (fun sv -> sv=v) statVars
+      | exp -> true
+  in aux exp
 
 let getVars = fun funDef ->
   let pvb_expr = 
@@ -85,41 +107,6 @@ let getStatVars = fun funDef ->
       | _::attrs -> aux attrs
   in aux attrList
 
-let getUsedStagedFun = fun funBody ->
-  let rec getUsf funBody =
-    match funBody with
-      {pexp_desc = Pexp_ifthenelse (cond, thenExp, elseExpOpt)} ->
-          begin match elseExpOpt with
-            None -> (getUsf cond)@(getUsf thenExp)
-            | Some elseExp ->  (getUsf cond)@(getUsf thenExp)@(getUsf elseExp)
-          end
-      | {pexp_desc = Pexp_match (condExp, pattExpList)} ->
-          (getUsf condExp)@(List.flatten (List.map (fun {pc_rhs = rhs} -> getUsf rhs) pattExpList))
-      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs} ->
-          let fname = 
-            begin match fn with 
-              {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
-              | _ -> "_AnonFun"
-            end in
-          let usedHere =
-            let rec aux attrs = 
-              match attrs with
-                [] -> []
-                | ({txt = "static.use"}, _)::_ -> [fname]
-                | _::attrs -> aux attrs
-            in aux attrs in
-          let usedInArgs = List.flatten (List.map (fun (_,exp) -> getUsf exp) argList) in
-          usedHere@usedInArgs
-      | {pexp_desc = Pexp_construct (lid, constrExpOpt)} ->
-          begin match constrExpOpt with
-            None -> []
-            | Some exp -> getUsf exp 
-          end
-      | {pexp_desc = Pexp_tuple es} ->
-          List.flatten (List.map (fun e -> getUsf e) es)
-      | exp -> []
-  in getUsf funBody
-
 let rec removeArguments funBody n =
   if n = 0
     then funBody 
@@ -128,90 +115,7 @@ let rec removeArguments funBody n =
         {pexp_desc = Pexp_fun (_, _, _, funBody)} -> removeArguments funBody (n-1)
         | _ -> failwith "arguments missing?"
 
-let rec expContainsVar = fun exp var ->
-  match exp with
-    {pexp_desc = Pexp_apply (op, es)} ->
-        List.exists (fun (_, e) -> expContainsVar e var) es
-    | {pexp_desc = Pexp_ident {txt = Lident v}} ->
-        v = var
-    | _ -> false
-
-let isControlVarStatic = fun statVars actualBody ->
-  let rec aux body =
-    match body with
-      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt)} ->
-          (List.exists (fun v -> expContainsVar condExp v) statVars) 
-            || aux thenExp 
-            || begin match elseExpOpt with Some e -> aux e | None -> false end
-      | {pexp_desc = Pexp_match (condExp, pattExpList)} ->
-          (List.exists (fun v -> expContainsVar condExp v) statVars)
-            || List.fold_left (||) false (List.map (fun pattExp -> aux pattExp.pc_rhs) pattExpList)
-      | {pexp_desc = Pexp_apply (op, es)} ->
-          List.exists (fun (_, e) -> aux e) es
-      | _ -> false
-  in aux actualBody
-
-let subAuxBody = fun funBody funName statVars dynVars loc ->
-  let rec sub funBody inEsc =
-    match funBody with
-      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          let condExp' = sub condExp inEsc in
-          let liftBranch = (List.exists (fun v -> expContainsVar condExp v) statVars) in
-          let thenExp' = if liftBranch 
-                           then (applyLift (sub thenExp inEsc) loc) 
-                           else sub thenExp inEsc
-          in let elseExpOpt' = 
-            begin match elseExpOpt with
-              None -> None
-              | Some elseExp -> 
-                  if liftBranch 
-                    then Some (applyLift (sub elseExp inEsc) loc)
-                    else Some (sub elseExp inEsc)
-            end in
-          Exp.ifthenelse ~loc ~attrs condExp' thenExp' elseExpOpt'
-      | {pexp_desc = Pexp_match (condExp, pattExpList); pexp_attributes = attrs; pexp_loc = loc} ->
-          let condExp' = sub condExp inEsc in
-          let liftBranch = (List.exists (fun v -> expContainsVar condExp v) statVars) in
-          Exp.match_ ~loc ~attrs condExp' 
-            (List.map 
-               (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} -> 
-                  {pc_lhs = lhs; pc_guard = guard; pc_rhs = (if liftBranch 
-                                                               then applyLift (sub rhs inEsc) loc
-                                                               else sub rhs inEsc)}) 
-               pattExpList)
-      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
-          let fname = 
-            begin match fn with 
-              {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
-              | _ -> "_AnonFun"
-            end in
-          let fn' = 
-            if fname = funName
-              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "aux"}
-              else fn
-          in let argList' = 
-            let rec aux args =
-              match args with
-                [] -> []
-                | (lbl, exp)::args -> (lbl, sub exp (fname = funName))::(aux args)
-            in aux argList
-          in let e = Exp.apply ~loc ~attrs fn' argList' in
-          if fname = funName then applyEsc e loc else e
-      | {pexp_desc = Pexp_construct (lid, constrExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          begin match constrExpOpt with
-            None -> Exp.construct ~loc ~attrs lid None
-            | Some exp -> Exp.construct ~loc ~attrs lid (Some (sub exp inEsc)) 
-          end
-      | {pexp_desc = Pexp_tuple es; pexp_attributes = attrs; pexp_loc = loc} ->
-          Exp.tuple ~loc ~attrs (List.map (fun e -> sub e inEsc) es)
-      | {pexp_desc = Pexp_ident {txt = Lident v; loc = loc}} ->
-          if not inEsc && (List.exists (fun dv -> v=dv) dynVars)
-            then applyEsc funBody loc
-            else funBody
-      | exp -> exp
-  in sub funBody false
-
-let buildAuxCall = fun vars statVars dynVars loc ->
+let buildAuxCall = fun auxName vars dynVars loc ->
   let newBodyArgs =
     List.map
       (fun v ->
@@ -220,115 +124,159 @@ let buildAuxCall = fun vars statVars dynVars loc ->
              then ("", applyLift identExp loc)
              else ("", identExp))
       vars
-  in let newBody =
-    Exp.apply ~loc ~attrs:[] 
-      (Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident "aux"})
-      newBodyArgs
-  in applyEsc newBody loc
-
-let subUsedStagedFun = fun funBody usedStagedFun statVars ->
-  let rec sub funBody =
-    match funBody with
-      {pexp_desc = Pexp_ifthenelse (cond, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          begin match elseExpOpt with
-            None -> Exp.ifthenelse ~loc ~attrs cond (sub thenExp) None
-            | Some elseExp -> Exp.ifthenelse ~loc ~attrs:[] cond (sub thenExp) (Some (sub elseExp))
-          end
-      | {pexp_desc = Pexp_match (condExp, pattExpList); pexp_attributes = attrs; pexp_loc = loc} ->
-          Exp.match_ ~loc ~attrs condExp 
-            (List.map 
-               (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} -> 
-                  {pc_lhs = lhs; pc_guard = guard; pc_rhs = sub rhs}) 
-               pattExpList)
+  in Exp.apply ~loc ~attrs:[] 
+       (Exp.ident ~loc ~attrs:[] {txt = Lident auxName; loc = loc})
+       newBodyArgs
+  
+let rec buildAuxBody = fun funBody vars statVars dynVars funName auxName loc ->
+  let rec sub exp inEsc =
+    match exp with
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
+          let (condAux, condExp') = sub condExp inEsc in
+          let (thenAux, thenExp') = buildStagedBody thenExp vars statVars dynVars funName true auxName loc in
+          let (elseAux, elseExpOpt') = 
+            begin match elseExpOpt with
+              None -> ([], None)
+              | Some elseExp -> 
+                  let (aux, e) = buildStagedBody elseExp vars statVars dynVars funName true auxName loc in
+                  (aux, Some e)
+            end in
+          let body = Exp.ifthenelse ~loc ~attrs condExp thenExp' elseExpOpt' in
+          (condAux@thenAux@elseAux, body)
       | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
           let fname = 
             begin match fn with 
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
               | _ -> "_AnonFun"
             end in
-          let isStagedFun =
-            let rec aux sfs = 
-              match sfs with
-                [] -> false
-                | sfn::sfs -> if fname = sfn then true else aux sfs
-            in aux usedStagedFun in 
-          let argList' = 
-            if isStagedFun
-              then 
-                let rec aux args =
-                  match args with
-                    [] -> []
-                    | (lbl, exp)::args ->
-                        match exp with
-                          {pexp_desc = Pexp_ident {txt = Lident v}} ->
-                            if List.exists (fun sv -> sv=v) statVars
-                              then aux args
-                              else (lbl, exp)::(aux args)
-                    | exp -> (lbl, sub exp)::(aux args)
-                in aux argList
-              else List.map (fun (lbl, exp) -> (lbl, sub exp)) argList
-          in let attrs' =
-            let rec aux attrs = 
-              match attrs with
+          let fn' = 
+            if fname = funName
+              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident auxName}
+              else fn
+          in let argList' = 
+            let rec aux args =
+              match args with
                 [] -> []
-                | ({txt = "static.use"}, _)::attrs -> attrs
-                | attr::attrs -> attr::(aux attrs)
-            in aux attrs in
-          Exp.apply ~loc ~attrs:attrs' fn argList'
-      | {pexp_desc = Pexp_construct (lid, constrExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          begin match constrExpOpt with
-            None -> Exp.construct ~loc ~attrs lid None
-            | Some exp -> Exp.construct ~loc ~attrs lid (Some (sub exp)) 
-          end
-      | {pexp_desc = Pexp_tuple es; pexp_attributes = attrs; pexp_loc = loc} ->
-          Exp.tuple ~loc ~attrs (List.map (fun e -> sub e) es)
-      | exp -> exp
-  in sub funBody
-
-let subRecCall = fun funBody funName statVars ->
-  let rec sub funBody =
-    match funBody with
-      {pexp_desc = Pexp_ifthenelse (cond, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          begin match elseExpOpt with
-            None -> Exp.ifthenelse ~loc ~attrs cond (sub thenExp) None
-            | Some elseExp -> Exp.ifthenelse ~loc ~attrs:[] cond (sub thenExp) (Some (sub elseExp))
-          end
-      | {pexp_desc = Pexp_match (condExp, pattExpList); pexp_attributes = attrs; pexp_loc = loc} ->
-          Exp.match_ ~loc ~attrs condExp 
-            (List.map 
-               (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} -> 
-                  {pc_lhs = lhs; pc_guard = guard; pc_rhs = sub rhs}) 
-               pattExpList)
+                | (lbl, exp)::args -> (lbl, sub exp (inEsc || (fname = funName)))::(aux args)
+            in aux argList
+          in let auxs = List.flatten (List.map (fun (lbl, (aux, arg)) -> aux) argList') in
+          let args = List.map (fun (lbl, (aux, arg)) -> (lbl, arg)) argList' in
+          let e = Exp.apply ~loc ~attrs fn' args in
+          if fname = funName then (auxs, applyEsc e loc) else (auxs, e)
+      | {pexp_desc = Pexp_ident {txt = Lident v; loc = loc}} ->
+          if not inEsc && (List.exists (fun dv -> v=dv) dynVars)
+            then ([], applyEsc funBody loc)
+            else ([], funBody)
+      | exp -> ([], exp)
+  in sub funBody false
+ 
+and buildStagedBody = fun funBody vars statVars dynVars funName inAux auxName loc ->
+  let rec stage exp inEsc =
+    match exp with
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
+          if isStaticExp condExp statVars
+            then
+              let auxName = fresh "aux" in
+              let (auxAux, auxBody) = buildAuxBody exp vars statVars dynVars funName auxName loc in
+              let auxCall = buildAuxCall auxName vars dynVars loc in
+              (auxAux@[(auxName, auxBody)], auxCall)
+            else
+              let (condAux, condExp') = 
+                let (aux, e) = stage condExp inEsc in 
+                (aux, applyEsc e loc)
+              in let (thenAux, thenExp') =
+                let (aux, e) = stage thenExp inEsc in 
+                (aux, applyEsc e loc)
+              in let (elseAux, elseExpOpt') =
+                begin match elseExpOpt with
+                  None -> ([], None)
+                  | Some elseExp -> 
+                    let (elseAux, elseExp') =
+                      let (aux, e) = stage elseExp inEsc in 
+                      (aux, applyEsc e loc)
+                    in (elseAux, Some elseExp')
+                end in
+              let body = Exp.ifthenelse ~loc ~attrs condExp' thenExp' elseExpOpt' in
+              (condAux@thenAux@elseAux, applyLift body loc)
       | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
           let fname = 
             begin match fn with 
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
               | _ -> "_AnonFun"
             end in
+          let fn' = 
+            if inAux && (fname = funName)
+              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident auxName}
+              else fn
+          in let inEsc' = inEsc || (inAux && (fname = funName)) in
+          let aux_stagedArgs = 
+            let rec aux args =
+              begin match args with
+                [] -> []
+                | (lbl, exp)::args -> 
+                    begin match exp with
+                      {pexp_desc = Pexp_ident {txt = Lident v}} ->
+                          if inAux
+                            then (lbl, stage exp inEsc')::(aux args)
+                            else
+                              if (fname = funName) && List.exists (fun sv -> sv=v) statVars
+                                then aux args
+                                else (lbl, stage exp inEsc')::(aux args)
+                      | exp -> (lbl, stage exp inEsc')::(aux args)
+                    end
+              end in
+            aux argList in
+          let auxs = List.flatten (List.map (fun (lbl, (aux, arg)) -> aux) aux_stagedArgs) in
+          let args = List.map (fun (lbl, (aux, arg)) -> (lbl, applyEsc arg loc)) aux_stagedArgs in
+          let e = Exp.apply ~loc ~attrs fn' args in
+          if inAux && (fname = funName)
+            then (auxs, e)
+            else (auxs, applyLift e loc)
+      | {pexp_desc = Pexp_ident {txt = Lident v}; pexp_attributes = attrs; pexp_loc = loc} ->
+          if inAux
+            then
+              if not inEsc && (List.exists (fun dv -> v=dv) dynVars)
+                then ([], exp)
+                else ([], applyLift exp loc)
+            else ([], applyLift exp loc)
+      | exp -> ([], applyLift exp loc)
+  in stage funBody false
+
+let rec cleanEscBracket = fun attrs ->
+  match attrs with
+    [] -> []
+    | attr::[] -> attrs
+    | ({txt = "metaocaml.escape"}, _)::({txt = "metaocaml.bracket"}, _)::attrs -> cleanEscBracket attrs
+    | attr::attrs -> attr::(cleanEscBracket attrs)
+
+let cleanMetaFun = fun funBody ->
+  let rec clean exp =
+    match exp with
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
+          let condExp' = clean condExp in
+          let thenExp' = clean thenExp in
+          let elseExpOpt' = 
+            begin match elseExpOpt with
+              None -> None
+              | Some elseExp -> Some (clean elseExp)
+            end in
+          let attrs' = cleanEscBracket attrs in
+          Exp.ifthenelse ~loc ~attrs:attrs' condExp' thenExp' elseExpOpt'
+      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
           let argList' = 
             let rec aux args =
               match args with
                 [] -> []
-                | (lbl, exp)::args ->
-                    match exp with
-                      {pexp_desc = Pexp_ident {txt = Lident v}} ->
-                          if fname = funName && List.exists (fun sv -> sv=v) statVars
-                            then aux args
-                            else (lbl, exp)::(aux args)
-                      | exp -> (lbl, sub exp)::(aux args)
+                | (lbl, exp)::args -> (lbl, clean exp)::(aux args)
             in aux argList
-          in Exp.apply ~loc ~attrs fn argList'
-      | {pexp_desc = Pexp_construct (lid, constrExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          begin match constrExpOpt with
-            None -> Exp.construct ~loc ~attrs lid None
-            | Some exp -> Exp.construct ~loc ~attrs lid (Some (sub exp)) 
-          end
-      | {pexp_desc = Pexp_tuple es; pexp_attributes = attrs; pexp_loc = loc} ->
-          Exp.tuple ~loc ~attrs (List.map (fun e -> sub e) es)
-      | exp -> exp
-  in sub funBody
+          in let attrs' = cleanEscBracket attrs in
+          Exp.apply ~loc ~attrs:attrs' fn argList'
+      | {pexp_desc = desc; pexp_attributes = attrs; pexp_loc = loc} ->
+          let attrs' = cleanEscBracket attrs in
+          {pexp_desc = desc; pexp_attributes = attrs'; pexp_loc = loc}
+  in clean funBody
 
-let buildArgList args body loc =
+let buildArgsList args body loc =
   let rec aux args =
     match args with
       [] -> body
@@ -338,57 +286,42 @@ let buildArgList args body loc =
             (aux args)
   in aux args
 
-let buildStagedBody = fun funRec statVars dynVars funBody funName loc ->
+let buildLetBoundStagedBody = fun funRec statVars dynVars funBody funName loc ->
   let recFlag = if funRec then Recursive else Nonrecursive in
+  let funBody' = applyEsc funBody loc in
   let letBody = 
     Exp.let_ ~loc ~attrs:[] recFlag
       [Vb.mk ~loc ~attrs:[]
-         (Pat.var ~loc ~attrs:[] {loc = loc; txt = funName})
-         (buildArgList dynVars funBody loc)]
-      (Exp.ident ~loc ~attrs:[] {loc=loc;txt=Lident funName})
+         (Pat.var ~loc ~attrs:[] {txt = funName; loc = loc})
+         (buildArgsList dynVars funBody' loc)]
+      (Exp.ident ~loc ~attrs:[] {txt = Lident funName; loc = loc})
   in applyLift letBody loc
   
-let getStagedBody = fun funBody loc vars statVars dynVars funRec funName usedStagedFun ->
-  let useAux = isControlVarStatic statVars funBody in
-  let toStageBody =
-    if useAux
-      then buildAuxCall vars statVars dynVars loc
-      else subRecCall funBody funName statVars
-  in let toStageBody' =
-    if (List.length usedStagedFun) > 0 
-      then subUsedStagedFun toStageBody usedStagedFun statVars
-      else toStageBody
-  in let stagedBody = buildStagedBody (funRec && (not useAux)) 
-                        statVars dynVars toStageBody' funName loc
-  in let fullBody = 
-    if useAux
-      then let auxBody = subAuxBody funBody funName statVars dynVars loc in
-           let auxBody' =
-             if (List.length usedStagedFun) > 0 
-               then subUsedStagedFun auxBody usedStagedFun statVars
-               else auxBody
-           in Exp.let_ ~loc ~attrs:[] Recursive
-             [Vb.mk ~loc ~attrs:[]
-                (Pat.var ~loc ~attrs:[] {loc = loc; txt = "aux"})
-                (buildArgList vars auxBody' loc)]
-           stagedBody
-      else stagedBody
-  in let fullBodyWithDecl = 
-    let rec aux usfs = 
-      match usfs with
-        [] -> fullBody
-        | usfn::usfs ->
-            let declBody = 
-              applyRun (applyLift (applyEsc (applyFun 
-                (List.map (fun v -> Exp.ident ~loc ~attrs:[] {txt = Lident v; loc = loc}) statVars)
-                (getStagedName usfn statVars) loc) loc) loc) loc
-            in Exp.let_ ~loc ~attrs:[] Nonrecursive
-                 [Vb.mk ~loc ~attrs:[]
-                   (Pat.var ~loc ~attrs:[] {loc = loc; txt = usfn})
-                   declBody]
-                 (aux usfs)
-    in aux usedStagedFun
-  in buildArgList statVars fullBodyWithDecl loc
+let recCallExists funName funBody =
+  let rec aux exp =
+    match exp with
+      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
+          let existInElse = 
+            begin match elseExpOpt with
+              None -> false
+              | Some elseExp -> aux elseExp
+            end in
+          (aux condExp) || (aux thenExp) || existInElse
+      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
+          let fname = 
+            begin match fn with 
+              {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
+              | _ -> "_AnonFun"
+            end in
+          let existInArgs = 
+            let rec aux1 args =
+              match args with
+                [] -> false
+                | (lbl, exp)::args -> (aux exp) || (aux1 args)
+            in aux1 argList
+          in existInArgs || (fname = funName)
+      | exp -> false
+  in aux funBody
 
 let buildMeta = fun funRec funDef vars statVars dynVars -> 
   let strLoc = funDef.pstr_loc in
@@ -403,9 +336,25 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
       | _ -> failwith "not a valid fun name pattern"
   in let stagedName = Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = getStagedName funName statVars} in
   let funBody = removeArguments (List.hd f).pvb_expr (List.length vars) in
-  let usedStagedFun = getUsedStagedFun funBody in
-  let stagedBody = getStagedBody funBody vbLoc vars statVars dynVars funRec funName usedStagedFun in
-  Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName stagedBody]
+  let (auxs, stagedBody) = buildStagedBody funBody vars statVars dynVars funName false "" vbLoc in
+  let cleanedStagedBody = cleanMetaFun stagedBody in
+  let letBoundStagedBody = buildLetBoundStagedBody 
+                             (funRec && (recCallExists funName cleanedStagedBody))
+                             statVars dynVars cleanedStagedBody funName vbLoc
+  in let stagedBodyWithAux =
+    let rec attachAuxs auxs =
+      match auxs with
+        [] -> letBoundStagedBody
+        | (auxName, auxBody)::auxs ->
+            let cleanedAux = cleanMetaFun auxBody in
+            Exp.let_ ~loc:vbLoc ~attrs:[] Recursive
+               [Vb.mk ~loc:vbLoc ~attrs:[]
+                  (Pat.var ~loc:vbLoc ~attrs:[] {loc = vbLoc; txt = auxName})
+                  (buildArgsList vars cleanedAux vbLoc)]
+               (attachAuxs auxs)
+    in attachAuxs auxs
+  in let metaFun = buildArgsList statVars stagedBodyWithAux vbLoc in
+  Str.value ~loc:strLoc Nonrecursive [Vb.mk ~loc:vbLoc ~attrs:[] stagedName metaFun]
 
 let toMeta_mapper argv =
   { default_mapper with

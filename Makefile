@@ -1,4 +1,4 @@
-PPX = ppx_toMeta1
+PPX = ppx_toMeta
 
 squall: ppx sample
 
