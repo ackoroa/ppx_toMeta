@@ -318,42 +318,6 @@ let rec buildAuxBody = fun funBody vars statVars dynVars usedStagedFun funName a
           let branches = List.map (fun (aux, branch) -> branch) pattExpList' in
           let body = Exp.match_ ~loc ~attrs condExp branches in
           (branchAuxs, body)
-      | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
-          let fname = 
-            begin match fn with 
-              {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
-              | _ -> "_AnonFun"
-            end in
-          let fn' = 
-            if fname = funName
-              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident auxName}
-              else fn
-          in let argList' = 
-            let rec aux args =
-              match args with
-                [] -> []
-                | (lbl, exp)::args -> (lbl, sub exp (inEsc || (fname = funName)))::(aux args)
-            in aux argList
-          in let auxs = List.flatten (List.map (fun (lbl, (aux, arg)) -> aux) argList') in
-          let args = List.map (fun (lbl, (aux, arg)) -> (lbl, arg)) argList' in
-          let e = Exp.apply ~loc ~attrs fn' args in
-          if fname = funName then (auxs, applyEsc e loc) else (auxs, e)
-      | {pexp_desc = Pexp_construct (lid, constrExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          begin match constrExpOpt with
-            None -> ([], Exp.construct ~loc ~attrs lid None)
-            | Some exp -> 
-                let (aux, e) = sub exp inEsc in
-                (aux, Exp.construct ~loc ~attrs lid (Some e))
-          end
-      | {pexp_desc = Pexp_tuple es; pexp_attributes = attrs; pexp_loc = loc} ->
-          let aux_es = List.map (fun e -> sub e inEsc) es in
-          let auxs = List.flatten (List.map (fun (aux, e) -> aux) aux_es) in
-          let es' = List.map (fun (aux, e) -> e) aux_es in
-          (auxs, Exp.tuple ~loc ~attrs es') 
-      | {pexp_desc = Pexp_ident {txt = Lident v; loc = loc}} ->
-          if not inEsc && (List.exists (fun dv -> v=dv) dynVars)
-            then ([], applyEsc funBody loc)
-            else ([], funBody)
       | exp -> ([], exp)
   in sub funBody false
  
