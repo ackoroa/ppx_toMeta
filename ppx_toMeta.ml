@@ -222,7 +222,6 @@ let recCallExists = fun funName funBody ->
 let rec cleanEscBracket = fun attrs ->
   match attrs with
     [] -> []
-    | attr::[] -> attrs
     | ({txt = "metaocaml.escape"}, _)::({txt = "metaocaml.bracket"}, _)::attrs -> cleanEscBracket attrs
     | attr::attrs -> attr::(cleanEscBracket attrs)
 
@@ -283,23 +282,19 @@ let buildAuxCall = fun auxName vars dynVars loc ->
   in Exp.apply ~loc ~attrs:[] 
        (Exp.ident ~loc ~attrs:[] {txt = Lident auxName; loc = loc})
        vars'
-  
+
 let rec buildAuxBody = fun funBody vars statVars dynVars usedStagedFun funName auxName loc ->
   let rec sub exp inEsc =
     match exp with
       {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          let (thenAux, thenExp') = buildStagedBody thenExp 
-                                      vars statVars dynVars 
-                                      usedStagedFun funName 
-                                      true auxName loc
+          let (thenAux, thenExp') = buildStagedBody thenExp vars statVars dynVars 
+                                      usedStagedFun funName true auxName loc
           in let (elseAux, elseExpOpt') = 
             begin match elseExpOpt with
               None -> ([], None)
               | Some elseExp -> 
-                  let (aux, e) = buildStagedBody elseExp 
-                                   vars statVars dynVars 
-                                   usedStagedFun funName 
-                                   true auxName loc
+                  let (aux, e) = buildStagedBody elseExp vars statVars dynVars 
+                                   usedStagedFun funName true auxName loc
                   in (aux, Some e)
             end in
           let body = Exp.ifthenelse ~loc ~attrs condExp thenExp' elseExpOpt' in
@@ -308,10 +303,8 @@ let rec buildAuxBody = fun funBody vars statVars dynVars usedStagedFun funName a
           let pattExpList' =
             (List.map 
                (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} ->
-                  let (aux, rhs') = buildStagedBody rhs 
-                                      vars statVars dynVars 
-                                      usedStagedFun funName 
-                                      true auxName loc 
+                  let (aux, rhs') = buildStagedBody rhs vars statVars dynVars 
+                                      usedStagedFun funName true auxName loc 
                   in (aux, {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs'})) 
                pattExpList)
           in let branchAuxs = List.flatten (List.map (fun (aux, branch) -> aux) pattExpList') in
@@ -333,21 +326,18 @@ and buildStagedBody = fun funBody vars statVars dynVars usedStagedFun funName in
               in let auxCall = buildAuxCall auxName vars dynVars loc in
               (auxAux@[(auxName, auxBody)], auxCall)
             else
-              let (condAux, condExp') = 
-                let (aux, e) = stage condExp inEsc in 
-                (aux, applyEsc e loc)
-              in let (thenAux, thenExp') = 
-                let (aux, e) = stage thenExp inEsc in 
-                (aux, applyEsc e loc)
-              in let (elseAux, elseExpOpt') =
+              let (condAux, condExp') = stage condExp inEsc in
+              let (thenAux, thenExp') = stage thenExp inEsc in
+              let (elseAux, elseExpOpt') =
                 begin match elseExpOpt with
                   None -> ([], None)
                   | Some elseExp -> 
                       let (aux, e) = stage elseExp inEsc in 
                       (aux, Some (applyEsc e loc))
                 end in
-              let body = Exp.ifthenelse ~loc ~attrs condExp' thenExp' elseExpOpt' in
-              (condAux@thenAux@elseAux, applyLift body loc)
+              let body = Exp.ifthenelse ~loc ~attrs (applyEsc condExp' loc) 
+                           (applyEsc thenExp' loc) elseExpOpt'
+              in (condAux@thenAux@elseAux, applyLift body loc)
       | {pexp_desc = Pexp_match (condExp, pattExpList); pexp_attributes = attrs; pexp_loc = loc} ->
           if isStaticExp condExp statVars
             then
@@ -365,7 +355,7 @@ and buildStagedBody = fun funBody vars statVars dynVars usedStagedFun funName in
                    (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} ->
                      let (aux, rhs') = stage rhs inEsc in 
                      (aux, {pc_lhs = lhs; pc_guard = guard; pc_rhs = applyEsc rhs' loc})) 
-                  pattExpList)
+                   pattExpList)
               in let branchAuxs = List.flatten (List.map (fun (aux, branch) -> aux) pattExpList') in
               let branches = List.map (fun (aux, branch) -> branch) pattExpList' in
               let body = Exp.match_ ~loc ~attrs condExp' branches in
@@ -374,31 +364,50 @@ and buildStagedBody = fun funBody vars statVars dynVars usedStagedFun funName in
           let fname = 
             begin match fn with 
               {pexp_desc = Pexp_ident {txt = Lident fname}} -> fname
-              | _ -> "_AnonFun"
+              | _ -> "__AnonFun__"
             end in
           let fn' = 
             if inAux && (fname = funName)
               then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident auxName}
               else fn
-          in let inEsc' = inEsc || (inAux && (fname = funName)) in
-          let aux_stagedArgs = 
-            let rec aux args =
-              begin match args with
-                [] -> []
-                | (lbl, exp)::args -> 
-                    begin match exp with
-                      {pexp_desc = Pexp_ident {txt = Lident v}} ->
-                          if inAux
-                            then (lbl, stage exp inEsc')::(aux args)
-                            else
-                              if (fname = funName) && List.exists (fun sv -> sv=v) statVars
-                                then aux args
-                                else (lbl, stage exp inEsc')::(aux args)
-                      | exp -> (lbl, stage exp inEsc')::(aux args)
-                    end
-              end in
-            aux argList in
-          let auxs = List.flatten (List.map (fun (lbl, (aux, arg)) -> aux) aux_stagedArgs) in
+          in let isStagedFun = List.exists 
+                                 (fun ({txt = id}, _) -> id = "static.use") 
+                                 attrs 
+          in let aux_stagedArgs = 
+            if isStagedFun 
+              then
+                let (_, usvidxs_usvexps) = List.find 
+                                             (fun (ufn, idxs_exps) -> ufn = fname) 
+                                             usedStagedFun 
+                in let usvidxs = List.map (fun (idxs, _) -> idxs) usvidxs_usvexps in
+                let rec aux args n =
+                  begin match args with
+                    [] -> []
+                    | (lbl, exp)::args ->
+                        if List.exists (fun idx -> n = idx) usvidxs
+                          then aux args (n + 1)
+                          else (lbl, stage exp inEsc)::(aux args (n + 1))
+                  end in
+                aux argList 0
+              else
+                let inEsc' = inEsc || (inAux && (fname = funName)) in
+                let rec aux args =
+                  begin match args with
+                    [] -> []
+                    | (lbl, exp)::args -> 
+                        begin match exp with
+                          {pexp_desc = Pexp_ident {txt = Lident v}} ->
+                              if inAux
+                                then (lbl, stage exp inEsc')::(aux args)
+                                else
+                                  if (fname = funName) && List.exists (fun sv -> sv=v) statVars
+                                    then aux args
+                                    else (lbl, stage exp inEsc')::(aux args)
+                          | exp -> (lbl, stage exp inEsc')::(aux args)
+                        end
+                  end in
+                aux argList
+          in let auxs = List.flatten (List.map (fun (lbl, (aux, arg)) -> aux) aux_stagedArgs) in
           let args = List.map (fun (lbl, (aux, arg)) -> (lbl, applyEsc arg loc)) aux_stagedArgs in
           let e = Exp.apply ~loc ~attrs fn' args in
           if inAux && (fname = funName)
