@@ -4,7 +4,12 @@ open Asttypes
 open Parsetree
 open Longident
 
-let attachOrigFun = false
+let rec pil il =
+  match il with 
+    [] -> print_newline ()
+    | i::il -> print_int i; print_string " "; pil il
+
+let attachOrigFun = true
 
 let msg_syntaxErrorDecl = "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
 let msg_syntaxErrorUse = "Syntax error for toMeta annotation. Annotation is of the form [@static,use <statVars>] where statVars = [] | sv::statVars"
@@ -154,13 +159,13 @@ let getUsedStagedFun = fun funBody statVars ->
                       List.map 
                         (fun (_, exp) -> (isStaticExp exp statVars, exp)) 
                         argList
-                    in let statVarIdxs = 
+                    in let statArgIdxExps = 
                       List.filter 
                         (fun (i, _) -> i >= 0) 
                         (List.mapi 
                            (fun idx (isStat, arg) -> if isStat then (idx, arg) else (-1, arg))
                            isArgStatic)
-                    in [(fname, statVarIdxs)]
+                    in [(fname, statArgIdxExps)]
                 | _::attrs -> aux attrs
             in aux attrs
           in let usedInArgs = List.flatten (List.map (fun (_, exp) -> getUsf exp) argList) in
@@ -219,11 +224,12 @@ let recCallExists = fun funName funBody ->
       | exp -> false
   in aux funBody
 
-let rec cleanEscBracket = fun attrs ->
+let rec cleanAttrs = fun attrs ->
   match attrs with
     [] -> []
-    | ({txt = "metaocaml.escape"}, _)::({txt = "metaocaml.bracket"}, _)::attrs -> cleanEscBracket attrs
-    | attr::attrs -> attr::(cleanEscBracket attrs)
+    | ({txt = "static.use"}, _)::attrs -> cleanAttrs attrs
+    | ({txt = "metaocaml.escape"}, _)::({txt = "metaocaml.bracket"}, _)::attrs -> cleanAttrs attrs
+    | attr::attrs -> attr::(cleanAttrs attrs)
 
 let cleanMetaFun = fun funBody ->
   let rec clean exp =
@@ -236,7 +242,7 @@ let cleanMetaFun = fun funBody ->
               None -> None
               | Some elseExp -> Some (clean elseExp)
             end in
-          let attrs' = cleanEscBracket attrs in
+          let attrs' = cleanAttrs attrs in
           Exp.ifthenelse ~loc ~attrs:attrs' condExp' thenExp' elseExpOpt'
       | {pexp_desc = Pexp_match (condExp, pattExpList); pexp_attributes = attrs; pexp_loc = loc} ->
           let condExp' = clean condExp in
@@ -245,7 +251,8 @@ let cleanMetaFun = fun funBody ->
                (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} ->
                   {pc_lhs = lhs; pc_guard = guard; pc_rhs = clean rhs}) 
                pattExpList)
-          in Exp.match_ ~loc ~attrs condExp' pattExpList'
+          in let attrs' = cleanAttrs attrs in
+          Exp.match_ ~loc ~attrs:attrs' condExp' pattExpList'
       | {pexp_desc = Pexp_apply (fn, argList); pexp_attributes = attrs; pexp_loc = loc} ->
           let argList' = 
             let rec aux args =
@@ -253,20 +260,20 @@ let cleanMetaFun = fun funBody ->
                 [] -> []
                 | (lbl, exp)::args -> (lbl, clean exp)::(aux args)
             in aux argList
-          in let attrs' = cleanEscBracket attrs in
+          in let attrs' = cleanAttrs attrs in
           Exp.apply ~loc ~attrs:attrs' fn argList'
       | {pexp_desc = Pexp_construct (lid, constrExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
-          let attrs' = cleanEscBracket attrs in
+          let attrs' = cleanAttrs attrs in
           begin match constrExpOpt with
             None -> Exp.construct ~loc ~attrs:attrs' lid None
             | Some exp -> Exp.construct ~loc ~attrs:attrs' lid (Some (clean exp))
           end
       | {pexp_desc = Pexp_tuple es; pexp_attributes = attrs; pexp_loc = loc} ->
-          let attrs' = cleanEscBracket attrs in
+          let attrs' = cleanAttrs attrs in
           let es' = List.map (fun e -> clean e) es in
           Exp.tuple ~loc ~attrs:attrs' es'
       | {pexp_desc = desc; pexp_attributes = attrs; pexp_loc = loc} ->
-          let attrs' = cleanEscBracket attrs in
+          let attrs' = cleanAttrs attrs in
           {pexp_desc = desc; pexp_attributes = attrs'; pexp_loc = loc}
   in clean funBody
 
@@ -376,11 +383,22 @@ and buildStagedBody = fun funBody vars statVars dynVars usedStagedFun funName in
           in let aux_stagedArgs = 
             if isStagedFun 
               then
-                let (_, usvidxs_usvexps) = List.find 
-                                             (fun (ufn, idxs_exps) -> ufn = fname) 
-                                             usedStagedFun 
-                in let usvidxs = List.map (fun (idxs, _) -> idxs) usvidxs_usvexps in
-                let rec aux args n =
+                let usvidxs =
+                  try
+                    let svidxs = List.filter (fun i -> i >= 0)
+                                   (List.mapi
+                                      (fun idx (_, exp) -> 
+                                         if isStaticExp exp statVars 
+                                           then idx
+                                           else -1) 
+                                      argList)
+                    in let _ = List.find
+                                 (fun (fn, sfn, idxs) -> 
+                                    (fn = fname) && (idxs = svidxs)) 
+                                 !stagedFun
+                    in svidxs
+                  with Not_found -> []
+                in let rec aux args n =
                   begin match args with
                     [] -> []
                     | (lbl, exp)::args ->
@@ -475,26 +493,28 @@ let attachDecls = fun usedStagedFun mainBody loc ->
       [] -> mainBody
       | (ufn, ufsvidxs_ufargs)::usfs ->
         let ufsvidxs = List.map (fun (idx, arg) -> idx) ufsvidxs_ufargs in 
-        let (fn, sfn, svidxs) = 
-          List.find 
-            (fun (fn, _, svidxs) -> (fn=ufn) && (svidxs=ufsvidxs)) 
-            !stagedFun
-        in let declBody = 
-          applyRun (applyLift (applyEsc (applyFun 
-            (List.map 
-               (fun idx -> 
-                  let (i,a) = 
-                    List.find 
-                      (fun (i,a) -> i=idx) 
-                      ufsvidxs_ufargs
-                  in a)
-               svidxs)
-            sfn loc) loc) loc) loc
-        in Exp.let_ ~loc ~attrs:[] Nonrecursive
-             [Vb.mk ~loc ~attrs:[]
-                (Pat.var ~loc ~attrs:[] {txt = fn; loc = loc})
-                declBody]
-             (attach usfs)
+        try 
+          let (fn, sfn, svidxs) = 
+            List.find 
+              (fun (fn, _, svidxs) -> (fn=ufn) && (svidxs=ufsvidxs)) 
+              !stagedFun
+          in let declBody = 
+            applyRun (applyLift (applyEsc (applyFun 
+              (List.map 
+                 (fun idx -> 
+                    let (i,a) = 
+                      List.find 
+                        (fun (i,a) -> i=idx) 
+                        ufsvidxs_ufargs
+                    in a)
+                 svidxs)
+              sfn loc) loc) loc) loc
+          in Exp.let_ ~loc ~attrs:[] Nonrecursive
+               [Vb.mk ~loc ~attrs:[]
+                  (Pat.var ~loc ~attrs:[] {txt = fn; loc = loc})
+                  declBody]
+               (attach usfs)
+        with Not_found -> attach usfs 
   in attach usedStagedFun
 
 let buildMeta = fun funRec funDef vars statVars dynVars -> 
