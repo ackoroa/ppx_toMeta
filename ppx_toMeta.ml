@@ -475,17 +475,20 @@ let buildLetBoundStagedBody = fun funRec statVars dynVars funBody funName loc ->
   in applyLift letBody loc
 
 let attachAuxs = fun auxs vars mainBody loc ->
-  let rec attach auxs =
-    match auxs with
-      [] -> mainBody
-      | (auxName, auxBody)::auxs ->
-          let cleanedAux = cleanMetaFun auxBody in
-          Exp.let_ ~loc ~attrs:[] Recursive
-            [Vb.mk ~loc ~attrs:[]
-              (Pat.var ~loc ~attrs:[] {txt = auxName; loc = loc})
-              (buildArgsList vars cleanedAux loc)]
-            (attach auxs)
-  in attach auxs
+  if List.length auxs > 0
+    then
+      let rec attach auxs =
+        match auxs with
+          [] -> []
+          | (auxName, auxBody)::auxs ->
+              let cleanedAux = cleanMetaFun auxBody in
+              (Vb.mk ~loc ~attrs:[]
+                 (Pat.var ~loc ~attrs:[] {txt = auxName; loc = loc})
+                 (buildArgsList vars cleanedAux loc))
+              ::(attach auxs)
+      in let valueBindings = attach auxs in
+      Exp.let_ ~loc ~attrs:[] Recursive valueBindings mainBody
+    else mainBody          
 
 let attachDecls = fun usedStagedFun mainBody loc ->
   let rec attach usfs =
