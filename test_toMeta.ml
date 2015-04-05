@@ -33,6 +33,12 @@ let nestedBranchm x y =
     | _ -> "_"
 [@@static []] [@@static [x]] [@@static [y]] [@@static [x;y]] 
 
+let rec nestedBranchRec x y =
+  if x = 0
+    then if y = 0 then "x" else nestedBranchRec x y
+    else "_"
+[@@static []] [@@static [x]] [@@static [y]] [@@static [x;y]] 
+
 let rec ff y m =
   if y = 0 then 0 else pow y m [@static.use] + ff (y - 1) m
 [@@static []] [@@static [y]] [@@static [m]] [@@static [y;m]]
