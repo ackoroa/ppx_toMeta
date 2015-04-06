@@ -290,18 +290,18 @@ let buildAuxCall = fun auxName vars dynVars loc ->
        (Exp.ident ~loc ~attrs:[] {txt = Lident auxName; loc = loc})
        vars'
 
-let rec buildAuxBody = fun funBody vars statVars dynVars usedStagedFun funName auxName loc ->
+let rec buildAuxBody = fun funBody vars statVars dynVars usedStagedFun funName auxName firstAuxName loc ->
   let rec sub exp inEsc =
     match exp with
       {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
           let (thenAux, thenExp') = buildStagedBody thenExp vars statVars dynVars 
-                                      usedStagedFun funName true auxName loc
+                                      usedStagedFun funName true firstAuxName loc
           in let (elseAux, elseExpOpt') = 
             begin match elseExpOpt with
               None -> ([], None)
               | Some elseExp -> 
                   let (aux, e) = buildStagedBody elseExp vars statVars dynVars 
-                                   usedStagedFun funName true auxName loc
+                                   usedStagedFun funName true firstAuxName loc
                   in (aux, Some e)
             end in
           let body = Exp.ifthenelse ~loc ~attrs condExp thenExp' elseExpOpt' in
@@ -311,7 +311,7 @@ let rec buildAuxBody = fun funBody vars statVars dynVars usedStagedFun funName a
             (List.map 
                (fun {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs} ->
                   let (aux, rhs') = buildStagedBody rhs vars statVars dynVars 
-                                      usedStagedFun funName true auxName loc 
+                                      usedStagedFun funName true firstAuxName loc 
                   in (aux, {pc_lhs = lhs; pc_guard = guard; pc_rhs = rhs'})) 
                pattExpList)
           in let branchAuxs = List.flatten (List.map (fun (aux, branch) -> aux) pattExpList') in
@@ -321,15 +321,16 @@ let rec buildAuxBody = fun funBody vars statVars dynVars usedStagedFun funName a
       | exp -> ([], exp)
   in sub funBody false
  
-and buildStagedBody = fun funBody vars statVars dynVars usedStagedFun funName inAux auxName loc ->
+and buildStagedBody = fun funBody vars statVars dynVars usedStagedFun funName inAux firstAuxName loc ->
   let rec stage exp inEsc =
     match exp with
       {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
           if isStaticExp condExp statVars
             then
               let auxName = fresh "aux" in
+              let firstAuxName = if firstAuxName = "" then auxName else firstAuxName in
               let (auxAux, auxBody) = buildAuxBody exp vars statVars dynVars 
-                                        usedStagedFun funName auxName loc
+                                        usedStagedFun funName auxName firstAuxName loc
               in let auxCall = buildAuxCall auxName vars dynVars loc in
               (auxAux@[(auxName, auxBody)], auxCall)
             else
@@ -349,8 +350,9 @@ and buildStagedBody = fun funBody vars statVars dynVars usedStagedFun funName in
           if isStaticExp condExp statVars
             then
               let auxName = fresh "aux" in
+              let firstAuxName = if firstAuxName = "" then auxName else firstAuxName in
               let (auxAux, auxBody) = buildAuxBody exp vars statVars dynVars 
-                                        usedStagedFun funName auxName loc 
+                                        usedStagedFun funName auxName firstAuxName loc 
               in let auxCall = buildAuxCall auxName vars dynVars loc in
               (auxAux@[(auxName, auxBody)], auxCall)
             else
@@ -375,7 +377,7 @@ and buildStagedBody = fun funBody vars statVars dynVars usedStagedFun funName in
             end in
           let fn' = 
             if inAux && (fname = funName)
-              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident auxName}
+              then Exp.ident ~loc ~attrs:[] {loc = loc; txt = Lident firstAuxName}
               else fn
           in let isStagedFun = List.exists 
                                  (fun ({txt = id}, _) -> id = "static.use") 
