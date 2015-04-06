@@ -1,3 +1,5 @@
-let rec geo x n =
-  if n = 0 then 1 else x * geo (x+1) (n-1)
-[@@static []] [@@static [x]] [@@static [n]] [@@static [x;n]]
+let rec nestedBranchRec x y =
+  if x = 0
+    then if y = 0 then "x" else nestedBranchRec (x + 1) (y + 1)
+    else "_"
+[@@static [x]]
