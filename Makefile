@@ -1,7 +1,5 @@
 PPX = ppx_toMeta
 
-squall: ppx sample
-
 foo: ppx foo.ml
 	ocamlfind ppx_tools/rewriter ./$(PPX).native foo.ml > temp.ml
 	#cat temp.ml
@@ -11,7 +9,8 @@ foo: ppx foo.ml
 intr: ppx interpreter.ml interpreter_defs.ml
 	ocamlfind ppx_tools/rewriter ./$(PPX).native interpreter.ml > temp.ml
 	metaocamlc interpreter_defs.ml	
-	metaocamlc -dsource interpreter.ml
+	metaocamlc -dsource temp.ml
+	rm *.cmi *.cmo *.out
 
 ppx: $(PPX).ml
 	ocamlbuild -package compiler-libs.common $(PPX).native
