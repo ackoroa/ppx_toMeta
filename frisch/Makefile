@@ -104,6 +104,7 @@ builder-t:
 	ocamlfind ppx_tools/rewriter ./ppx_builder.native test_builder.ml
 
 # nomli2:
+	ocamlbuild -r -package compiler-libs.common -package compiler-libs.bytecomp -package ppx_tools.metaquot -package ppx_tools nomli.native
 # 	ocamlbuild -r -package compiler-libs.common -package ppx_tools nomli.native
 
 nomli2:
