@@ -4,11 +4,6 @@ open Asttypes
 open Parsetree
 open Longident
 
-let rec pil il =
-  match il with 
-    [] -> print_newline ()
-    | i::il -> print_int i; print_string " "; pil il
-
 let attachOrigFun = true
 
 let msg_syntaxErrorDecl = "Syntax error for toMeta annotation. Annotation is of the form [@@static <statVars>] where statVars = [] | sv::statVars"
