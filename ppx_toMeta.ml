@@ -261,7 +261,11 @@ let rec cleanAttrs = fun attrs ->
 let cleanMetaFun = fun funBody ->
   let rec clean exp =
     match exp with
-      {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
+      {pexp_desc = Pexp_fun (lbl, opt, pat, exp); pexp_attributes = attrs; pexp_loc = loc} ->
+          let attrs' = cleanAttrs attrs in
+          let exp' = clean exp in
+          Exp.fun_ ~loc ~attrs:attrs' lbl opt pat exp'
+      | {pexp_desc = Pexp_ifthenelse (condExp, thenExp, elseExpOpt); pexp_attributes = attrs; pexp_loc = loc} ->
           let condExp' = clean condExp in
           let thenExp' = clean thenExp in
           let elseExpOpt' = 
@@ -498,11 +502,12 @@ let buildArgsList = fun args body loc ->
 let buildLetBoundStagedBody = fun funRec statVars dynVars funBody funName loc ->
   let recFlag = if funRec then Recursive else Nonrecursive in
   let funBody' = applyEsc funBody loc in
+  let cleanedFunBody = cleanMetaFun funBody' in
   let letBody = 
     Exp.let_ ~loc ~attrs:[] recFlag
       [Vb.mk ~loc ~attrs:[]
          (Pat.var ~loc ~attrs:[] {txt = funName; loc = loc})
-         (buildArgsList dynVars funBody' loc)]
+         (buildArgsList dynVars cleanedFunBody loc)]
       (Exp.ident ~loc ~attrs:[] {txt = Lident funName; loc = loc})
   in applyLift letBody loc
 
@@ -568,10 +573,9 @@ let buildMeta = fun funRec funDef vars statVars dynVars ->
   let funBody = removeArguments (List.hd f).pvb_expr (List.length vars) in
   let usedStagedFun = getUsedStagedFun funBody statVars in
   let (auxs, stagedBody) = buildStagedBody funBody vars statVars dynVars usedStagedFun funName false "" vbLoc in
-  let cleanedStagedBody = cleanMetaFun stagedBody in
   let letBoundStagedBody = buildLetBoundStagedBody 
-                             (funRec && (recCallExists funName cleanedStagedBody))
-                             statVars dynVars cleanedStagedBody funName vbLoc
+                             (funRec && (recCallExists funName stagedBody))
+                             statVars dynVars stagedBody funName vbLoc
   in let stagedBodyWithAux = attachAuxs auxs vars letBoundStagedBody vbLoc in
   let stagedBodyWithDecl = attachDecls usedStagedFun stagedBodyWithAux vbLoc in
   let metaFun = buildArgsList statVars stagedBodyWithDecl vbLoc in
